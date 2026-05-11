@@ -1,6 +1,10 @@
+pub mod config;
+pub mod conversion;
 pub mod extract;
 pub mod ocr;
 pub mod ocr_merge;
+pub mod output;
+pub mod parser;
 pub mod projection;
 pub mod render;
 pub mod types;

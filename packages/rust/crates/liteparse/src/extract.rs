@@ -39,6 +39,52 @@ pub fn extract_pages(
     Ok(pages)
 }
 
+/// Extract pages with filtering by target page list and max pages, with optional password.
+pub fn extract_pages_filtered(
+    pdf_path: &str,
+    target_pages: Option<&[u32]>,
+    max_pages: usize,
+    password: Option<&str>,
+) -> Result<Vec<LitePage>, Box<dyn std::error::Error>> {
+    let lib = Library::init();
+    let document = lib.load_document(pdf_path, password)?;
+    let page_count = document.page_count();
+    let mut pages = Vec::new();
+
+    for page_index in 0..page_count {
+        let page_number = page_index as u32 + 1;
+
+        if let Some(targets) = target_pages {
+            if !targets.contains(&page_number) {
+                continue;
+            }
+        }
+
+        if pages.len() >= max_pages {
+            break;
+        }
+
+        let page = document.page(page_index)?;
+        let text_page = page.text()?;
+        let view_box = page.view_box().unwrap_or(RectF {
+            left: 0.0,
+            top: page.height(),
+            right: page.width(),
+            bottom: 0.0,
+        });
+        let text_items = extract_page_text_items(&page, &text_page, &view_box)?;
+
+        pages.push(LitePage {
+            page_number: page_number as usize,
+            page_width: page.width(),
+            page_height: page.height(),
+            text_items,
+        });
+    }
+
+    Ok(pages)
+}
+
 /// Extract raw text items and print each page as a JSON-line object to stdout.
 pub fn extract(pdf_path: &str, page_num: Option<u32>) -> Result<(), Box<dyn std::error::Error>> {
     let pages = extract_pages(pdf_path, page_num)?;

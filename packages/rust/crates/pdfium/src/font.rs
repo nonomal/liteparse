@@ -35,13 +35,18 @@ impl Font {
 
     /// Get the base font name (PostScript name, subset prefix stripped by PDFium).
     pub fn base_name(&self) -> Option<String> {
-        let len = unsafe { pdfium_sys::FPDFFont_GetBaseFontName(self.handle, std::ptr::null_mut(), 0) };
+        let len =
+            unsafe { pdfium_sys::FPDFFont_GetBaseFontName(self.handle, std::ptr::null_mut(), 0) };
         if len == 0 {
             return None;
         }
         let mut buf: Vec<u8> = vec![0; len];
         let written = unsafe {
-            pdfium_sys::FPDFFont_GetBaseFontName(self.handle, buf.as_mut_ptr() as *mut std::ffi::c_char, len)
+            pdfium_sys::FPDFFont_GetBaseFontName(
+                self.handle,
+                buf.as_mut_ptr() as *mut std::ffi::c_char,
+                len,
+            )
         };
         if written == 0 {
             return None;
@@ -93,7 +98,10 @@ impl Font {
         let mut width: f32 = 0.0;
         let ok = unsafe {
             pdfium_sys::FPDFFont_GetGlyphWidthFromCharCode(
-                self.handle, char_code, font_size, &mut width,
+                self.handle,
+                char_code,
+                font_size,
+                &mut width,
             )
         };
         if ok != 0 { Some(width) } else { None }
@@ -103,9 +111,7 @@ impl Font {
     pub fn glyph_width(&self, unicode: u32, font_size: f32) -> Option<f32> {
         let mut width: f32 = 0.0;
         let ok = unsafe {
-            pdfium_sys::FPDFFont_GetGlyphWidth(
-                self.handle, unicode, font_size, &mut width,
-            )
+            pdfium_sys::FPDFFont_GetGlyphWidth(self.handle, unicode, font_size, &mut width)
         };
         if ok != 0 { Some(width) } else { None }
     }

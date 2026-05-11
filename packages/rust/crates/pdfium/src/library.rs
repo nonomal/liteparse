@@ -18,7 +18,11 @@ impl Library {
         Library { _private: () }
     }
 
-    pub fn load_document(&self, path: &str, password: Option<&str>) -> Result<Document, PdfiumError> {
+    pub fn load_document(
+        &self,
+        path: &str,
+        password: Option<&str>,
+    ) -> Result<Document, PdfiumError> {
         let c_path = CString::new(path).map_err(|_| PdfiumError::FileNotFound)?;
         let c_password = password
             .map(|p| CString::new(p).map_err(|_| PdfiumError::OperationFailed))
@@ -38,7 +42,11 @@ impl Library {
         Ok(Document { handle })
     }
 
-    pub fn load_document_from_bytes(&self, data: &[u8], password: Option<&str>) -> Result<Document, PdfiumError> {
+    pub fn load_document_from_bytes(
+        &self,
+        data: &[u8],
+        password: Option<&str>,
+    ) -> Result<Document, PdfiumError> {
         let c_password = password
             .map(|p| CString::new(p).map_err(|_| PdfiumError::OperationFailed))
             .transpose()?;

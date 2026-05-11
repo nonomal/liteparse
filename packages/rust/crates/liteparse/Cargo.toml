@@ -10,3 +10,4 @@ pdfium = { path = "../pdfium" }
 pdfium-sys = { path = "../pdfium-sys" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+tesseract-rs = { version = "0.1", features = ["build-tesseract"] }

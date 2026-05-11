@@ -1,8 +1,11 @@
+use crate::types::{Page as LitePage, TextItem};
 use pdfium::{Font, FontType, Library, Page, RectF, TextPage};
-use crate::types::{TextItem, Page as LitePage};
 
 /// Extract pages from a PDF file and return them as structured data.
-pub fn extract_pages(pdf_path: &str, page_num: Option<u32>) -> Result<Vec<LitePage>, Box<dyn std::error::Error>> {
+pub fn extract_pages(
+    pdf_path: &str,
+    page_num: Option<u32>,
+) -> Result<Vec<LitePage>, Box<dyn std::error::Error>> {
     let lib = Library::init();
     let document = lib.load_document(pdf_path, None)?;
     let page_count = document.page_count();
@@ -75,7 +78,9 @@ fn extract_page_text_items(
     let mut seg = SegmentBuilder::new();
 
     for i in 0..char_count {
-        let Some(ch) = text_page.char_at(i) else { continue };
+        let Some(ch) = text_page.char_at(i) else {
+            continue;
+        };
         let unicode = ch.unicode();
         let is_generated = ch.is_generated();
 
@@ -94,13 +99,13 @@ fn extract_page_text_items(
         // Some PDF fonts encode ligatures as control characters; expand them.
         // We use the first char for segment decisions, then append trailing chars.
         let (c, ligature_tail): (char, &str) = match unicode {
-            0x02 => ('-', ""),        // STX → hyphen (common in some PDF encodings)
-            0x1A => ('f', "f"),       // ff ligature
-            0x1B => ('f', "t"),       // ft ligature
-            0x1C => ('f', "i"),       // fi ligature
-            0x1D => ('T', "h"),       // Th ligature
-            0x1E => ('f', "fi"),      // ffi ligature
-            0x1F => ('f', "l"),       // fl ligature
+            0x02 => ('-', ""),   // STX → hyphen (common in some PDF encodings)
+            0x1A => ('f', "f"),  // ff ligature
+            0x1B => ('f', "t"),  // ft ligature
+            0x1C => ('f', "i"),  // fi ligature
+            0x1D => ('T', "h"),  // Th ligature
+            0x1E => ('f', "fi"), // ffi ligature
+            0x1F => ('f', "l"),  // fl ligature
             _ => match char::from_u32(unicode) {
                 Some(ch_mapped) => (ch_mapped, ""),
                 None => continue,
@@ -125,7 +130,9 @@ fn extract_page_text_items(
         }
 
         // Get loose bounds in viewport space for the item bounding box
-        let Some(loose_box) = ch.loose_char_box() else { continue };
+        let Some(loose_box) = ch.loose_char_box() else {
+            continue;
+        };
         let vp_loose = page.bounds_to_viewport(view_box, &loose_box);
 
         // Skip zero-height characters (phantom dots from dot leader decorations)
@@ -134,7 +141,9 @@ fn extract_page_text_items(
         }
 
         // Also get strict char box for gap calculation (stays in viewport space)
-        let Some(strict_box) = ch.char_box() else { continue };
+        let Some(strict_box) = ch.char_box() else {
+            continue;
+        };
         let strict_rect = RectF {
             left: strict_box.left as f32,
             top: strict_box.top as f32,
@@ -165,7 +174,7 @@ fn extract_page_text_items(
             let dot_leader_break = if seg.pending_space {
                 // With a pending space: break at dot/non-dot transitions
                 (c == '.' && seg.has_non_dot_content())
-                || (c != '.' && !seg.has_non_dot_content() && seg.char_count >= 3)
+                    || (c != '.' && !seg.has_non_dot_content() && seg.char_count >= 3)
             } else {
                 // Without a pending space: break when a dot follows non-dot content
                 // with a gap larger than typical intra-word spacing (dot leader dots
@@ -273,8 +282,8 @@ fn adjust_angle_for_rotation(angle_rad: f32, page_rotation: i32) -> f32 {
     let mut a = angle_rad;
     match page_rotation {
         1 => a -= 3.0 * PI / 2.0, // 90°
-        2 => a -= PI,               // 180°
-        3 => a -= PI / 2.0,         // 270°
+        2 => a -= PI,             // 180°
+        3 => a -= PI / 2.0,       // 270°
         _ => {}
     }
     a = a.rem_euclid(2.0 * PI);
@@ -432,7 +441,9 @@ impl SegmentBuilder {
         }
 
         let fs = ch.font_size() as f32;
-        self.font_size = if fs > 0.0 { fs } else {
+        self.font_size = if fs > 0.0 {
+            fs
+        } else {
             (vp_loose.bottom - vp_loose.top).abs()
         };
 
@@ -538,7 +549,9 @@ impl SegmentBuilder {
 
     /// Returns true if the segment contains any characters that aren't dots or spaces.
     fn has_non_dot_content(&self) -> bool {
-        self.text.chars().any(|c| c != '.' && c != ' ' && c != '·' && c != '•')
+        self.text
+            .chars()
+            .any(|c| c != '.' && c != ' ' && c != '·' && c != '•')
     }
 
     /// Record that a space was seen.
@@ -575,17 +588,26 @@ impl SegmentBuilder {
                 height,
                 rotation: self.rotation_deg,
                 font_name: self.font_name.clone(),
-                font_size: Some(if self.font_size > 0.0 { self.font_size } else { height }),
+                font_size: Some(if self.font_size > 0.0 {
+                    self.font_size
+                } else {
+                    height
+                }),
                 font_height: self.font_height,
                 font_ascent: self.font_ascent,
                 font_descent: self.font_descent,
                 font_weight: self.font_weight,
                 font_flags: self.font_flags,
-                text_width: if self.text_width > 0.0 { Some(self.text_width) } else { None },
+                text_width: if self.text_width > 0.0 {
+                    Some(self.text_width)
+                } else {
+                    None
+                },
                 font_is_buggy: self.font_is_buggy,
                 mcid: self.mcid,
                 fill_color: self.fill_color.clone(),
                 stroke_color: self.stroke_color.clone(),
+                confidence: None,
             });
         }
 

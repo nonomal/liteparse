@@ -19,8 +19,7 @@ pub fn screenshot(
     let rgba = bitmap.to_rgba();
 
     let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
-        ImageBuffer::from_raw(width, height, rgba)
-            .ok_or("failed to create image buffer")?;
+        ImageBuffer::from_raw(width, height, rgba).ok_or("failed to create image buffer")?;
 
     img.save(output_path)?;
     eprintln!(

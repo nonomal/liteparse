@@ -58,6 +58,9 @@ pub struct TextItem {
     /// Stroke color as ARGB hex string.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stroke_color: Option<String>,
+    /// OCR confidence score (0.0–1.0). None for native PDF text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f32>,
 }
 
 /// Represents a single page in a PDF document, including its dimensions and extracted text items.

@@ -38,10 +38,20 @@ impl Page<'_> {
     /// Get the page bounding box (CropBox, falls back to MediaBox).
     /// Coordinates in PDF page space.
     pub fn view_box(&self) -> Option<RectF> {
-        let mut rect = pdfium_sys::FS_RECTF { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
+        let mut rect = pdfium_sys::FS_RECTF {
+            left: 0.0,
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+        };
         let ok = unsafe { pdfium_sys::FPDF_GetPageBoundingBox(self.handle, &mut rect) };
         if ok != 0 {
-            Some(RectF { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom })
+            Some(RectF {
+                left: rect.left,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+            })
         } else {
             None
         }
@@ -67,8 +77,10 @@ impl Page<'_> {
         unsafe {
             pdfium_sys::FPDF_PageToDevice(
                 self.handle,
-                0, 0,
-                device_w, device_h,
+                0,
+                0,
+                device_w,
+                device_h,
                 0, // rotation 0 — PDFium applies page rotation internally
                 page_x as f64,
                 page_y as f64,

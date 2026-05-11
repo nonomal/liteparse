@@ -1,5 +1,5 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::types::*;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 const FLOATING_SPACES: usize = 2;
 const COLUMN_SPACES: usize = 4;
@@ -113,7 +113,10 @@ fn canonical_rotation(rotation: f32) -> i32 {
 }
 
 fn handle_rotation_reading_order(items: &mut [ProjectedTextItem], page_height: f32) {
-    if !items.iter().any(|b| canonical_rotation(b.item.rotation) != 0) {
+    if !items
+        .iter()
+        .any(|b| canonical_rotation(b.item.rotation) != 0)
+    {
         return;
     }
 
@@ -127,12 +130,7 @@ fn handle_rotation_reading_order(items: &mut [ProjectedTextItem], page_height: f
     // Build group list sorted by each group's minimum X.
     let mut bbox_groups: Vec<Vec<usize>> = groups_by_rotation.into_values().collect();
     for group in &mut bbox_groups {
-        group.sort_by(|a, b| {
-            items[*a]
-                .item
-                .y
-                .total_cmp(&items[*b].item.y)
-        });
+        group.sort_by(|a, b| items[*a].item.y.total_cmp(&items[*b].item.y));
     }
 
     bbox_groups.sort_by(|a, b| {
@@ -171,7 +169,8 @@ fn handle_rotation_reading_order(items: &mut [ProjectedTextItem], page_height: f
                     continue;
                 }
                 let b = &items[*group_item_idx].item;
-                let x_overlap = b.x >= other_bbox.item.x && b.x <= other_bbox.item.x + other_bbox.item.width;
+                let x_overlap =
+                    b.x >= other_bbox.item.x && b.x <= other_bbox.item.x + other_bbox.item.width;
                 let y_overlap = b.y < other_bbox.item.y + other_bbox.item.height
                     && b.y + b.height > other_bbox.item.y;
                 if x_overlap && y_overlap {
@@ -264,12 +263,7 @@ fn handle_rotation_reading_order(items: &mut [ProjectedTextItem], page_height: f
         let rotation = canonical_rotation(items[group[0]].item.rotation);
         if rotation == 180 {
             let mut sorted = group.clone();
-            sorted.sort_by(|a, b| {
-                items[*a]
-                    .item
-                    .x
-                    .total_cmp(&items[*b].item.x)
-            });
+            sorted.sort_by(|a, b| items[*a].item.x.total_cmp(&items[*b].item.x));
             for idx in sorted {
                 items[idx].item.rotation = 0.0;
                 items[idx].rotated = true;
@@ -297,7 +291,10 @@ fn clean_projected_items(items: &mut Vec<ProjectedTextItem>, page_width: f32) {
 
     items.retain(|item| {
         let line_key = item.item.y.round() as i32;
-        let line_has_content = has_non_margin_by_line.get(&line_key).copied().unwrap_or(false);
+        let line_has_content = has_non_margin_by_line
+            .get(&line_key)
+            .copied()
+            .unwrap_or(false);
         let center = item.item.x + item.item.width * 0.5;
         let text = item.item.text.trim();
         let looks_like_line_number = {
@@ -372,10 +369,10 @@ fn form_lines(
         for item in items.iter_mut() {
             let center = item.item.x + item.item.width / 2.0;
 
-            if center > margin_left &&
-               center < margin_right &&
-               is_margin_line_number_text(&item.item.text) &&
-               item.item.width < 15.0
+            if center > margin_left
+                && center < margin_right
+                && is_margin_line_number_text(&item.item.text)
+                && item.item.width < 15.0
             {
                 item.is_margin_line_number = true;
             }
@@ -397,9 +394,15 @@ fn form_lines(
         ya.cmp(&yb).then_with(|| a.item.x.total_cmp(&b.item.x))
     });
 
-    fn can_merge(prev: &ProjectedTextItem, cur: &ProjectedTextItem, y_tolerance: f32, h_tolerance: f32) -> bool {
-        if (cur.item.y - prev.item.y).abs() <= y_tolerance &&
-           (cur.item.height - prev.item.height).abs() <= h_tolerance {
+    fn can_merge(
+        prev: &ProjectedTextItem,
+        cur: &ProjectedTextItem,
+        y_tolerance: f32,
+        h_tolerance: f32,
+    ) -> bool {
+        if (cur.item.y - prev.item.y).abs() <= y_tolerance
+            && (cur.item.height - prev.item.height).abs() <= h_tolerance
+        {
             let delta_x = cur.item.x - (prev.item.x + prev.item.width);
             return (-0.5..0.0).contains(&delta_x) || (0.0..0.1).contains(&delta_x);
         }
@@ -451,7 +454,9 @@ fn form_lines(
         if !current_line.is_empty() {
             let mut line_collide = false;
             for line_item in current_line.iter() {
-                let overlap_length = (line_item.item.x + line_item.item.width).min(item.item.x + item.item.width) - line_item.item.x.max(item.item.x);
+                let overlap_length = (line_item.item.x + line_item.item.width)
+                    .min(item.item.x + item.item.width)
+                    - line_item.item.x.max(item.item.x);
 
                 if overlap_length > f32::max(5.0, median_width / 3.0) {
                     line_collide = true;
@@ -481,12 +486,13 @@ fn form_lines(
             let proposed_max_y = current_line_max_y.max(item.item.y + item.item.height);
             let too_tall = (proposed_max_y - proposed_min_y) > median_height * 1.8;
 
-            if !line_collide && !margin_mismatch && !too_tall &&
-                (
-                    y_within_tolerance ||
-                    (item.item.y + item.item.height * 0.5 >= current_line_min_y && item.item.y + item.item.height * 0.5 <= current_line_max_y) ||
-                    (item.item.y >= current_line_min_y && item.item.y <= current_line_max_y)
-                )
+            if !line_collide
+                && !margin_mismatch
+                && !too_tall
+                && (y_within_tolerance
+                    || (item.item.y + item.item.height * 0.5 >= current_line_min_y
+                        && item.item.y + item.item.height * 0.5 <= current_line_max_y)
+                    || (item.item.y >= current_line_min_y && item.item.y <= current_line_max_y))
             {
                 current_line_min_y = current_line_min_y.min(item.item.y);
                 current_line_max_y = current_line_max_y.max(item.item.y + item.item.height);
@@ -885,7 +891,10 @@ fn segment_blocks(lines: &[Vec<ProjectedTextItem>]) -> Vec<LineRange> {
             if empty_count > 1 {
                 if let Some(s) = start {
                     // Include the trailing double-blank at the end of the block
-                    blocks.push(LineRange { start: s, end: line_idx + 1 });
+                    blocks.push(LineRange {
+                        start: s,
+                        end: line_idx + 1,
+                    });
                 }
                 start = None;
             }
@@ -898,12 +907,18 @@ fn segment_blocks(lines: &[Vec<ProjectedTextItem>]) -> Vec<LineRange> {
     }
 
     if let Some(s) = start {
-        blocks.push(LineRange { start: s, end: lines.len() });
+        blocks.push(LineRange {
+            start: s,
+            end: lines.len(),
+        });
     }
 
     // If no blocks found, treat entire page as one block
     if blocks.is_empty() && !lines.is_empty() {
-        blocks.push(LineRange { start: 0, end: lines.len() });
+        blocks.push(LineRange {
+            start: 0,
+            end: lines.len(),
+        });
     }
 
     blocks
@@ -914,7 +929,11 @@ fn segment_blocks(lines: &[Vec<ProjectedTextItem>]) -> Vec<LineRange> {
 fn extract_block_anchors(
     lines: &[Vec<ProjectedTextItem>],
     block: &LineRange,
-) -> (HashMap<i32, Vec<(usize, usize)>>, HashMap<i32, Vec<(usize, usize)>>, HashMap<i32, Vec<(usize, usize)>>) {
+) -> (
+    HashMap<i32, Vec<(usize, usize)>>,
+    HashMap<i32, Vec<(usize, usize)>>,
+    HashMap<i32, Vec<(usize, usize)>>,
+) {
     let mut anchor_left: HashMap<i32, Vec<(usize, usize)>> = HashMap::new();
     let mut anchor_right: HashMap<i32, Vec<(usize, usize)>> = HashMap::new();
     let mut anchor_center: HashMap<i32, Vec<(usize, usize)>> = HashMap::new();
@@ -924,9 +943,18 @@ fn extract_block_anchors(
             let left_key = anchor_key(bbox.item.x);
             let right_key = anchor_key(bbox.item.x + bbox.item.width);
             let center_key = anchor_key(bbox.item.x + bbox.item.width * 0.5);
-            anchor_left.entry(left_key).or_default().push((line_idx, box_idx));
-            anchor_right.entry(right_key).or_default().push((line_idx, box_idx));
-            anchor_center.entry(center_key).or_default().push((line_idx, box_idx));
+            anchor_left
+                .entry(left_key)
+                .or_default()
+                .push((line_idx, box_idx));
+            anchor_right
+                .entry(right_key)
+                .or_default()
+                .push((line_idx, box_idx));
+            anchor_center
+                .entry(center_key)
+                .or_default()
+                .push((line_idx, box_idx));
         }
     }
 
@@ -1047,13 +1075,19 @@ fn anchored_items_set(
 ) -> HashSet<(usize, usize)> {
     let mut set = HashSet::new();
     for members in anchor_left.values() {
-        for m in members { set.insert(*m); }
+        for m in members {
+            set.insert(*m);
+        }
     }
     for members in anchor_right.values() {
-        for m in members { set.insert(*m); }
+        for m in members {
+            set.insert(*m);
+        }
     }
     for members in anchor_center.values() {
-        for m in members { set.insert(*m); }
+        for m in members {
+            set.insert(*m);
+        }
     }
     set
 }
@@ -1084,12 +1118,22 @@ fn try_align_floating(
             let mut prev_diff = margin + 1.0;
 
             let adj_lines: [Option<usize>; 2] = [
-                if line_idx > block.start { Some(line_idx - 1) } else { None },
-                if line_idx + 1 < block.end { Some(line_idx + 1) } else { None },
+                if line_idx > block.start {
+                    Some(line_idx - 1)
+                } else {
+                    None
+                },
+                if line_idx + 1 < block.end {
+                    Some(line_idx + 1)
+                } else {
+                    None
+                },
             ];
 
             for adj_opt in &adj_lines {
-                let Some(adj_line_idx) = adj_opt else { continue };
+                let Some(adj_line_idx) = adj_opt else {
+                    continue;
+                };
                 for adj_box_idx in 0..lines[*adj_line_idx].len() {
                     let cand_key = anchor_key_fn(&lines[*adj_line_idx][adj_box_idx].item);
                     if !target.contains_key(&cand_key) {
@@ -1228,7 +1272,8 @@ fn render_line_as_flowing_text(
             let prev = &line[i - 1].item;
             let cur = &line[i].item;
             let gap = cur.x - (prev.x + prev.width);
-            let space_threshold = (cur.height * FLOWING_SPACE_HEIGHT_RATIO).max(FLOWING_SPACE_MIN_THRESHOLD);
+            let space_threshold =
+                (cur.height * FLOWING_SPACE_HEIGHT_RATIO).max(FLOWING_SPACE_MIN_THRESHOLD);
             if gap > space_threshold && !result.ends_with(' ') {
                 result.push(' ');
             }
@@ -1359,18 +1404,30 @@ fn detect_and_render_flowing_lines(
 // Main grid projection
 // ---------------------------------------------------------------------------
 
-fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) -> (Vec<ProjectedTextItem>, String) {
+fn project_to_grid(
+    page: &Page,
+    mut projection_boxes: Vec<ProjectedTextItem>,
+) -> (Vec<ProjectedTextItem>, String) {
     // Step 1a: Filter out items that are purely dots
     let mut dot_count = 0usize;
     projection_boxes.iter().for_each(|item| {
-        if item.item.text.chars().all(|c| c == '.' || c == '·' || c == '•') {
+        if item
+            .item
+            .text
+            .chars()
+            .all(|c| c == '.' || c == '·' || c == '•')
+        {
             dot_count += 1;
         }
     });
 
     if dot_count > 100 && (dot_count as f64) > (projection_boxes.len() as f64) * 0.05 {
         projection_boxes.retain(|item| {
-            !item.item.text.chars().all(|c| c == '.' || c == '·' || c == '•')
+            !item
+                .item
+                .text
+                .chars()
+                .all(|c| c == '.' || c == '·' || c == '•')
         });
     }
 
@@ -1387,7 +1444,12 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
     handle_rotation_reading_order(&mut projection_boxes, page.page_height);
 
     // Step 1e: Form lines of boxes
-    let mut lines = form_lines(&mut projection_boxes, median_width, median_height, page.page_width);
+    let mut lines = form_lines(
+        &mut projection_boxes,
+        median_width,
+        median_height,
+        page.page_width,
+    );
     if lines.is_empty() {
         return (Vec::new(), String::new());
     }
@@ -1430,18 +1492,33 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
         // Try to align floating bboxes to nearby existing anchors
         let anchored = anchored_items_set(&anchor_left, &anchor_right, &anchor_center);
         try_align_floating(
-            &mut anchor_left, &lines, block, &anchored, 2.0,
-            |item| item.x, |item| anchor_key(item.x),
+            &mut anchor_left,
+            &lines,
+            block,
+            &anchored,
+            2.0,
+            |item| item.x,
+            |item| anchor_key(item.x),
         );
         let anchored = anchored_items_set(&anchor_left, &anchor_right, &anchor_center);
         try_align_floating(
-            &mut anchor_right, &lines, block, &anchored, 2.0,
-            |item| item.x + item.width, |item| anchor_key(item.x + item.width),
+            &mut anchor_right,
+            &lines,
+            block,
+            &anchored,
+            2.0,
+            |item| item.x + item.width,
+            |item| anchor_key(item.x + item.width),
         );
         let anchored = anchored_items_set(&anchor_left, &anchor_right, &anchor_center);
         try_align_floating(
-            &mut anchor_center, &lines, block, &anchored, 2.0,
-            |item| item.x + item.width * 0.5, |item| anchor_key(item.x + item.width * 0.5),
+            &mut anchor_center,
+            &lines,
+            block,
+            &anchored,
+            2.0,
+            |item| item.x + item.width * 0.5,
+            |item| anchor_key(item.x + item.width * 0.5),
         );
 
         // Remove singletons
@@ -1450,7 +1527,15 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
         anchor_center.retain(|_, v| v.len() >= 2);
 
         // --- Flowing block detection ---
-        if is_flowing_text_block(&lines, block, &anchor_left, &anchor_right, &anchor_center, page.page_width, median_width) {
+        if is_flowing_text_block(
+            &lines,
+            block,
+            &anchor_left,
+            &anchor_right,
+            &anchor_center,
+            page.page_width,
+            median_width,
+        ) {
             render_flowing_block(&mut lines, block, &mut raw_lines, &mut meta, median_width);
             continue;
         }
@@ -1505,8 +1590,12 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
 
         // --- Per-line flowing detection (within structured blocks) ---
         detect_and_render_flowing_lines(
-            &mut lines, block, &mut raw_lines, &mut meta,
-            median_width, page.page_width,
+            &mut lines,
+            block,
+            &mut raw_lines,
+            &mut meta,
+            median_width,
+            page.page_width,
         );
 
         // --- Compute spacing hints (skip already-rendered flowing items) ---
@@ -1533,7 +1622,8 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
                         // Also detect column gaps using the relative gap method:
                         // if this line has a gap that's an outlier compared to other gaps,
                         // it's a column separator even if below the absolute threshold.
-                        let has_relative_column_gap = line_has_column_gap(&lines[line_idx], median_width, page.page_width);
+                        let has_relative_column_gap =
+                            line_has_column_gap(&lines[line_idx], median_width, page.page_width);
                         let same_column = x_delta < column_gap_threshold
                             && !(has_relative_column_gap && x_delta > median_width * 2.0);
 
@@ -1549,7 +1639,11 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
                             || prev_is_right_snap
                             || both_snapped
                         {
-                            should_space = if same_column { FLOATING_SPACES } else { COLUMN_SPACES };
+                            should_space = if same_column {
+                                FLOATING_SPACES
+                            } else {
+                                COLUMN_SPACES
+                            };
                         } else {
                             should_space = if same_column { 1 } else { FLOATING_SPACES };
                         }
@@ -1580,7 +1674,11 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
 
         // --- Main rendering loop (scoped to block) ---
         let mut has_changed = true;
-        while has_changed || !left_snaps.is_empty() || !right_snaps.is_empty() || !center_snaps.is_empty() {
+        while has_changed
+            || !left_snaps.is_empty()
+            || !right_snaps.is_empty()
+            || !center_snaps.is_empty()
+        {
             has_changed = false;
 
             // Render floating/unsnapped items first
@@ -1597,11 +1695,15 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
 
                         let x_key = anchor_key(lines[line_idx][box_idx].item.x);
                         let center_key = anchor_key(
-                            lines[line_idx][box_idx].item.x + lines[line_idx][box_idx].item.width * 0.5,
+                            lines[line_idx][box_idx].item.x
+                                + lines[line_idx][box_idx].item.width * 0.5,
                         );
                         if left_snaps.first().copied().is_some_and(|v| v < x_key)
                             || right_snaps.first().copied().is_some_and(|v| v < x_key)
-                            || center_snaps.first().copied().is_some_and(|v| v < center_key)
+                            || center_snaps
+                                .first()
+                                .copied()
+                                .is_some_and(|v| v < center_key)
                         {
                             continue;
                         }
@@ -1617,7 +1719,8 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
                     };
                     let mut target_x = ((bbox_x / median_width).round() as isize)
                         .max(0)
-                        .min(COLUMN_SPACES as isize) as usize;
+                        .min(COLUMN_SPACES as isize)
+                        as usize;
 
                     let x_key = anchor_key(bbox_x);
                     let last_snap_left = forward_left
@@ -1626,7 +1729,9 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
                         .max()
                         .unwrap_or(0);
 
-                    let line_max = last_snap_left.max(trim_end_len(&raw_lines[line_idx]) + meta[line_idx][box_idx].should_space);
+                    let line_max = last_snap_left.max(
+                        trim_end_len(&raw_lines[line_idx]) + meta[line_idx][box_idx].should_space,
+                    );
                     if target_x < line_max {
                         target_x = line_max;
                     }
@@ -1665,9 +1770,24 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
                     let right_bound = anchor_key(bbox_x + bbox_w);
                     let target_len = raw_lines[line_idx].len() + next_should_space;
 
-                    update_forward_anchor_right_bound(&left_snaps, &mut forward_left, right_bound, target_len);
-                    update_forward_anchor_right_bound(&right_snaps, &mut forward_right, right_bound, target_len);
-                    update_forward_anchor_right_bound(&floating_snaps, &mut forward_floating, right_bound, target_len);
+                    update_forward_anchor_right_bound(
+                        &left_snaps,
+                        &mut forward_left,
+                        right_bound,
+                        target_len,
+                    );
+                    update_forward_anchor_right_bound(
+                        &right_snaps,
+                        &mut forward_right,
+                        right_bound,
+                        target_len,
+                    );
+                    update_forward_anchor_right_bound(
+                        &floating_snaps,
+                        &mut forward_floating,
+                        right_bound,
+                        target_len,
+                    );
                 }
             }
 
@@ -1681,9 +1801,21 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
                 (Some(_), None, None) => Some(SnapKind::Left),
                 (None, Some(_), None) => Some(SnapKind::Right),
                 (None, None, Some(_)) => Some(SnapKind::Center),
-                (Some(l), Some(r), None) => Some(if l <= r { SnapKind::Left } else { SnapKind::Right }),
-                (Some(l), None, Some(c)) => Some(if l <= c { SnapKind::Left } else { SnapKind::Center }),
-                (None, Some(r), Some(c)) => Some(if r <= c { SnapKind::Right } else { SnapKind::Center }),
+                (Some(l), Some(r), None) => Some(if l <= r {
+                    SnapKind::Left
+                } else {
+                    SnapKind::Right
+                }),
+                (Some(l), None, Some(c)) => Some(if l <= c {
+                    SnapKind::Left
+                } else {
+                    SnapKind::Center
+                }),
+                (None, Some(r), Some(c)) => Some(if r <= c {
+                    SnapKind::Right
+                } else {
+                    SnapKind::Center
+                }),
                 (Some(l), Some(r), Some(c)) => {
                     if l <= r && l <= c {
                         Some(SnapKind::Left)
@@ -1717,9 +1849,15 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
                         continue;
                     }
                     let matches = match kind {
-                        SnapKind::Left => meta[line_idx][box_idx].left_anchor == Some(current_anchor),
-                        SnapKind::Right => meta[line_idx][box_idx].right_anchor == Some(current_anchor),
-                        SnapKind::Center => meta[line_idx][box_idx].center_anchor == Some(current_anchor),
+                        SnapKind::Left => {
+                            meta[line_idx][box_idx].left_anchor == Some(current_anchor)
+                        }
+                        SnapKind::Right => {
+                            meta[line_idx][box_idx].right_anchor == Some(current_anchor)
+                        }
+                        SnapKind::Center => {
+                            meta[line_idx][box_idx].center_anchor == Some(current_anchor)
+                        }
                     };
                     if matches {
                         turn_items.push((line_idx, box_idx));
@@ -1729,9 +1867,15 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
 
             if turn_items.is_empty() {
                 match kind {
-                    SnapKind::Left => { left_snaps.remove(0); }
-                    SnapKind::Right => { right_snaps.remove(0); }
-                    SnapKind::Center => { center_snaps.remove(0); }
+                    SnapKind::Left => {
+                        left_snaps.remove(0);
+                    }
+                    SnapKind::Right => {
+                        right_snaps.remove(0);
+                    }
+                    SnapKind::Center => {
+                        center_snaps.remove(0);
+                    }
                 }
                 continue;
             }
@@ -1745,7 +1889,11 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
             let line_max = match kind {
                 SnapKind::Left => turn_items
                     .iter()
-                    .map(|(li, bi)| raw_lines[*li].len() + line_space_end(&raw_lines[*li], meta[*li][*bi].should_space) + 1)
+                    .map(|(li, bi)| {
+                        raw_lines[*li].len()
+                            + line_space_end(&raw_lines[*li], meta[*li][*bi].should_space)
+                            + 1
+                    })
                     .max()
                     .unwrap_or(0),
                 SnapKind::Right => turn_items
@@ -1758,7 +1906,8 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
                             .map(|(_, v)| *v)
                             .max()
                             .unwrap_or(0);
-                        let left_bound = last_snap_left.max(trim_end_len(&raw_lines[*li]) + meta[*li][*bi].should_space);
+                        let left_bound = last_snap_left
+                            .max(trim_end_len(&raw_lines[*li]) + meta[*li][*bi].should_space);
                         left_bound + bbox.text.chars().count()
                     })
                     .max()
@@ -1767,7 +1916,9 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
                     .iter()
                     .map(|(li, bi)| {
                         let text_half = lines[*li][*bi].item.text.chars().count() / 2;
-                        raw_lines[*li].len() + text_half + line_space_end(&raw_lines[*li], meta[*li][*bi].should_space)
+                        raw_lines[*li].len()
+                            + text_half
+                            + line_space_end(&raw_lines[*li], meta[*li][*bi].should_space)
                     })
                     .max()
                     .unwrap_or(0),
@@ -1852,15 +2003,36 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
                 };
                 let right_bound = anchor_key(bbox_x + bbox_w);
                 let target_len = raw_lines[line_idx].len() + next_should_space;
-                update_forward_anchor_right_bound(&left_snaps, &mut forward_left, right_bound, target_len);
-                update_forward_anchor_right_bound(&right_snaps, &mut forward_right, right_bound, target_len);
-                update_forward_anchor_right_bound(&floating_snaps, &mut forward_floating, right_bound, target_len);
+                update_forward_anchor_right_bound(
+                    &left_snaps,
+                    &mut forward_left,
+                    right_bound,
+                    target_len,
+                );
+                update_forward_anchor_right_bound(
+                    &right_snaps,
+                    &mut forward_right,
+                    right_bound,
+                    target_len,
+                );
+                update_forward_anchor_right_bound(
+                    &floating_snaps,
+                    &mut forward_floating,
+                    right_bound,
+                    target_len,
+                );
             }
 
             match kind {
-                SnapKind::Left => { left_snaps.remove(0); }
-                SnapKind::Right => { right_snaps.remove(0); }
-                SnapKind::Center => { center_snaps.remove(0); }
+                SnapKind::Left => {
+                    left_snaps.remove(0);
+                }
+                SnapKind::Right => {
+                    right_snaps.remove(0);
+                }
+                SnapKind::Center => {
+                    center_snaps.remove(0);
+                }
             }
         }
 
@@ -1888,7 +2060,8 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
     }
 
     // Persist projected positions and flatten in line order.
-    let mut flattened: Vec<ProjectedTextItem> = Vec::with_capacity(lines.iter().map(|l| l.len()).sum());
+    let mut flattened: Vec<ProjectedTextItem> =
+        Vec::with_capacity(lines.iter().map(|l| l.len()).sum());
     for (line_idx, line) in lines.into_iter().enumerate() {
         for (box_idx, mut item) in line.into_iter().enumerate() {
             item.item.x = meta[line_idx][box_idx].projected_x as f32;
@@ -1918,7 +2091,8 @@ fn project_to_grid(page: &Page, mut projection_boxes: Vec<ProjectedTextItem>) ->
 
     clean_projected_items(&mut flattened, page.page_width);
 
-    let text = raw_lines.into_iter()
+    let text = raw_lines
+        .into_iter()
         .map(|l| l.trim_end().to_string())
         .collect::<Vec<_>>()
         .join("\n");
@@ -1973,29 +2147,34 @@ fn clean_rendered_text(text: &str) -> String {
 }
 
 pub fn project_pages_to_grid(pages: Vec<Page>) -> Vec<ParsedPage> {
-    pages.into_iter().map(|page| {
-        let projection_boxes = page.text_items.iter().map(|item| {
-            ProjectedTextItem {
-                item: item.clone(),
-                snap: Snap::Left,
-                anchor: Anchor::Left,
-                is_dup: false,
-                rendered: false,
-                num_spaces: 0,
-                force_unsnapped: false,
-                is_margin_line_number: false,
-                rotated: false,
-                d: 0.0,
-            }
-        }).collect();
+    pages
+        .into_iter()
+        .map(|page| {
+            let projection_boxes = page
+                .text_items
+                .iter()
+                .map(|item| ProjectedTextItem {
+                    item: item.clone(),
+                    snap: Snap::Left,
+                    anchor: Anchor::Left,
+                    is_dup: false,
+                    rendered: false,
+                    num_spaces: 0,
+                    force_unsnapped: false,
+                    is_margin_line_number: false,
+                    rotated: false,
+                    d: 0.0,
+                })
+                .collect();
 
-        let (projected_items, text) = project_to_grid(&page, projection_boxes);
-        ParsedPage {
-            page_number: page.page_number,
-            page_width: page.page_width,
-            page_height: page.page_height,
-            text,
-            text_items: projected_items.into_iter().map(|proj| proj.item).collect(),
-        }
-    }).collect()
+            let (projected_items, text) = project_to_grid(&page, projection_boxes);
+            ParsedPage {
+                page_number: page.page_number,
+                page_width: page.page_width,
+                page_height: page.page_height,
+                text,
+                text_items: projected_items.into_iter().map(|proj| proj.item).collect(),
+            }
+        })
+        .collect()
 }

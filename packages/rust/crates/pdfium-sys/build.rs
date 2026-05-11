@@ -4,17 +4,22 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const PDFIUM_RELEASE_TAG: &str = "chromium/7827";
-const PDFIUM_RELEASE_URL: &str =
-    "https://github.com/run-llama/pdfium-binaries/releases/download";
+const PDFIUM_RELEASE_URL: &str = "https://github.com/run-llama/pdfium-binaries/releases/download";
 
 fn main() {
     let (lib_dir, include_dir) = resolve_pdfium_dirs();
 
     let lib_dir = lib_dir.canonicalize().unwrap_or_else(|e| {
-        panic!("pdfium lib dir does not exist at {}: {e}", lib_dir.display())
+        panic!(
+            "pdfium lib dir does not exist at {}: {e}",
+            lib_dir.display()
+        )
     });
     let include_dir = include_dir.canonicalize().unwrap_or_else(|e| {
-        panic!("pdfium include dir does not exist at {}: {e}", include_dir.display())
+        panic!(
+            "pdfium include dir does not exist at {}: {e}",
+            include_dir.display()
+        )
     });
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
@@ -116,7 +121,9 @@ fn download_pdfium(dest: &Path) {
         fs::remove_dir_all(&tmp).ok();
     }
     fs::create_dir_all(&tmp).expect("failed to create temp dir");
-    archive.unpack(&tmp).expect("failed to extract pdfium archive");
+    archive
+        .unpack(&tmp)
+        .expect("failed to extract pdfium archive");
 
     // Fix dylib install name on macOS so @rpath resolution works
     fix_dylib_install_name(&tmp);

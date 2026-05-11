@@ -23,7 +23,10 @@ impl TextPage<'_> {
 
     pub fn char_at(&self, index: i32) -> Option<TextChar<'_>> {
         if index >= 0 && index < self.char_count() {
-            Some(TextChar { text_page: self, index })
+            Some(TextChar {
+                text_page: self,
+                index,
+            })
         } else {
             None
         }
@@ -42,10 +45,22 @@ impl TextPage<'_> {
         let mut right = 0.0;
         let mut bottom = 0.0;
         let ok = unsafe {
-            pdfium_sys::FPDFText_GetRect(self.handle, index, &mut left, &mut top, &mut right, &mut bottom)
+            pdfium_sys::FPDFText_GetRect(
+                self.handle,
+                index,
+                &mut left,
+                &mut top,
+                &mut right,
+                &mut bottom,
+            )
         };
         if ok != 0 {
-            Some(TextRect { left, top, right, bottom })
+            Some(TextRect {
+                left,
+                top,
+                right,
+                bottom,
+            })
         } else {
             None
         }
@@ -57,7 +72,10 @@ impl TextPage<'_> {
         let len = unsafe {
             pdfium_sys::FPDFText_GetBoundedText(
                 self.handle,
-                left, top, right, bottom,
+                left,
+                top,
+                right,
+                bottom,
                 std::ptr::null_mut(),
                 0,
             )
@@ -72,7 +90,10 @@ impl TextPage<'_> {
         let written = unsafe {
             pdfium_sys::FPDFText_GetBoundedText(
                 self.handle,
-                left, top, right, bottom,
+                left,
+                top,
+                right,
+                bottom,
                 buf.as_mut_ptr(),
                 buf_len,
             )
@@ -99,9 +120,8 @@ impl TextPage<'_> {
         }
         let buf_len = count + 1; // +1 for terminator
         let mut buf: Vec<u16> = vec![0; buf_len as usize];
-        let written = unsafe {
-            pdfium_sys::FPDFText_GetText(self.handle, start, count, buf.as_mut_ptr())
-        };
+        let written =
+            unsafe { pdfium_sys::FPDFText_GetText(self.handle, start, count, buf.as_mut_ptr()) };
         if written <= 0 {
             return String::new();
         }
@@ -205,12 +225,21 @@ impl TextChar<'_> {
         let mut a = 0u32;
         let ok = unsafe {
             pdfium_sys::FPDFText_GetStrokeColor(
-                self.text_page.handle, self.index,
-                &mut r, &mut g, &mut b, &mut a,
+                self.text_page.handle,
+                self.index,
+                &mut r,
+                &mut g,
+                &mut b,
+                &mut a,
             )
         };
         if ok != 0 {
-            Some(Color { r: r as u8, g: g as u8, b: b as u8, a: a as u8 })
+            Some(Color {
+                r: r as u8,
+                g: g as u8,
+                b: b as u8,
+                a: a as u8,
+            })
         } else {
             None
         }
@@ -224,12 +253,21 @@ impl TextChar<'_> {
         let mut a = 0u32;
         let ok = unsafe {
             pdfium_sys::FPDFText_GetFillColor(
-                self.text_page.handle, self.index,
-                &mut r, &mut g, &mut b, &mut a,
+                self.text_page.handle,
+                self.index,
+                &mut r,
+                &mut g,
+                &mut b,
+                &mut a,
             )
         };
         if ok != 0 {
-            Some(Color { r: r as u8, g: g as u8, b: b as u8, a: a as u8 })
+            Some(Color {
+                r: r as u8,
+                g: g as u8,
+                b: b as u8,
+                a: a as u8,
+            })
         } else {
             None
         }
@@ -257,12 +295,21 @@ impl TextChar<'_> {
         let mut top = 0.0;
         let ok = unsafe {
             pdfium_sys::FPDFText_GetCharBox(
-                self.text_page.handle, self.index,
-                &mut left, &mut right, &mut bottom, &mut top,
+                self.text_page.handle,
+                self.index,
+                &mut left,
+                &mut right,
+                &mut bottom,
+                &mut top,
             )
         };
         if ok != 0 {
-            Some(CharBox { left, right, bottom, top })
+            Some(CharBox {
+                left,
+                right,
+                bottom,
+                top,
+            })
         } else {
             None
         }
@@ -299,9 +346,8 @@ impl TextChar<'_> {
             e: 0.0,
             f: 0.0,
         };
-        let ok = unsafe {
-            pdfium_sys::FPDFText_GetMatrix(self.text_page.handle, self.index, &mut m)
-        };
+        let ok =
+            unsafe { pdfium_sys::FPDFText_GetMatrix(self.text_page.handle, self.index, &mut m) };
         if ok != 0 {
             Some(Matrix {
                 a: m.a,

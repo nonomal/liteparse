@@ -1,8 +1,3 @@
-// import axios from "axios";
-// import FormData from "form-data";
-// import fs from "fs";
-// import { OcrEngine, OcrOptions, OcrResult } from "./interface.js";
-
 use std::time::Duration;
 
 use reqwest::blocking::{

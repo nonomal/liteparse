@@ -133,46 +133,6 @@ impl PyParseResult {
         }
     }
 
-    fn to_rust(&self) -> liteparse::parser::ParseResult {
-        liteparse::parser::ParseResult {
-            pages: self
-                .pages
-                .iter()
-                .map(|p| liteparse::types::ParsedPage {
-                    page_number: p.page_num as usize,
-                    page_width: p.width as f32,
-                    page_height: p.height as f32,
-                    text: p.text.clone(),
-                    text_items: p
-                        .text_items
-                        .iter()
-                        .map(|item| liteparse::types::TextItem {
-                            text: item.text.clone(),
-                            x: item.x as f32,
-                            y: item.y as f32,
-                            width: item.width as f32,
-                            height: item.height as f32,
-                            rotation: 0.0,
-                            font_name: item.font_name.clone(),
-                            font_size: item.font_size.map(|v| v as f32),
-                            font_height: None,
-                            font_ascent: None,
-                            font_descent: None,
-                            font_weight: None,
-                            font_flags: None,
-                            text_width: None,
-                            font_is_buggy: false,
-                            mcid: None,
-                            fill_color: None,
-                            stroke_color: None,
-                            confidence: item.confidence.map(|v| v as f32),
-                        })
-                        .collect(),
-                })
-                .collect(),
-            text: self.text.clone(),
-        }
-    }
 }
 
 #[pyclass(frozen, from_py_object)]
@@ -369,14 +329,6 @@ impl LiteParse {
         }
 
         Ok(results)
-    }
-
-    /// Format a parse result according to the configured output format.
-    fn format(&self, result: &PyParseResult) -> PyResult<String> {
-        let rust_result = result.to_rust();
-        self.inner
-            .format(&rust_result)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
     fn __repr__(&self) -> String {

@@ -1,4 +1,4 @@
-use crate::config::{LiteParseConfig, OutputFormat, parse_target_pages};
+use crate::config::{LiteParseConfig, parse_target_pages};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::conversion;
 use crate::extract;
@@ -8,7 +8,6 @@ use crate::ocr::http_simple::HttpOcrEngine;
 #[cfg(feature = "tesseract")]
 use crate::ocr::tesseract::TesseractOcrEngine;
 use crate::ocr_merge;
-use crate::output::{json, text};
 use crate::projection;
 use crate::types::{ParsedPage, PdfInput};
 
@@ -174,14 +173,6 @@ impl LiteParse {
         })
     }
 
-    /// Format a parse result according to the configured output format.
-    pub fn format(&self, result: &ParseResult) -> Result<String, Box<dyn std::error::Error>> {
-        match self.config.output_format {
-            OutputFormat::Json => Ok(json::format_json(&result.pages)?),
-            OutputFormat::Text => Ok(text::format_text(&result.pages)),
-        }
-    }
-
     pub fn config(&self) -> &LiteParseConfig {
         &self.config
     }
@@ -203,37 +194,4 @@ mod tests {
         assert_eq!(lp.config().max_pages, 7);
     }
 
-    fn fake_result() -> ParseResult {
-        ParseResult {
-            pages: vec![ParsedPage {
-                page_number: 1,
-                page_width: 100.0,
-                page_height: 200.0,
-                text: "hello".into(),
-                text_items: vec![],
-            }],
-            text: "hello".into(),
-        }
-    }
-
-    #[test]
-    #[allow(clippy::field_reassign_with_default)]
-    fn test_format_json() {
-        let mut cfg = LiteParseConfig::default();
-        cfg.output_format = OutputFormat::Json;
-        let lp = LiteParse::new(cfg);
-        let s = lp.format(&fake_result()).unwrap();
-        assert!(s.contains("\"page\""));
-        assert!(s.contains("\"hello\""));
-    }
-
-    #[test]
-    #[allow(clippy::field_reassign_with_default)]
-    fn test_format_text() {
-        let mut cfg = LiteParseConfig::default();
-        cfg.output_format = OutputFormat::Text;
-        let lp = LiteParse::new(cfg);
-        let s = lp.format(&fake_result()).unwrap();
-        assert!(s.contains("hello"));
-    }
 }

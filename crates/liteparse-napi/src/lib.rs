@@ -101,15 +101,6 @@ impl LiteParse {
         Ok(results)
     }
 
-    /// Format a parse result according to the configured output format.
-    #[napi]
-    pub fn format(&self, result: JsParseResult) -> Result<String> {
-        let rust_result = result.to_rust();
-        self.inner
-            .format(&rust_result)
-            .map_err(|e| Error::from_reason(e.to_string()))
-    }
-
     /// Get the current configuration.
     #[napi(getter)]
     pub fn config(&self) -> JsLiteParseConfig {

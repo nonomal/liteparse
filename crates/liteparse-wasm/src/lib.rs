@@ -2,7 +2,7 @@
 //! WebAssembly bindings for LiteParse.
 //!
 //! Exposes a small JS-facing API mirroring `packages/node`:
-//!   - `LiteParse` class with `new(config)`, `parse(Uint8Array)`, `format(result)`
+//!   - `LiteParse` class with `new(config)`, `parse(Uint8Array)`
 //!   - JS-side OCR callback bridge (any object with an async `recognize` method)
 
 use std::pin::Pin;
@@ -331,33 +331,4 @@ impl LiteParse {
             .map_err(|e| JsError::new(&format!("serialize result failed: {}", e)))
     }
 
-    /// Format a parse result (JS object as returned from `parse`) as a string
-    /// according to the configured `outputFormat` (`"json"` or `"text"`).
-    pub fn format(&self, result: JsValue) -> Result<String, JsError> {
-        // Round-trip via serde_json to reuse the same formatters as native.
-        let pages_val = Reflect::get(&result, &JsValue::from_str("pages"))
-            .map_err(|_| JsError::new("result.pages missing"))?;
-        let raw_pages: serde_json::Value = serde_wasm_bindgen::from_value(pages_val)
-            .map_err(|e| JsError::new(&format!("decode pages failed: {}", e)))?;
-
-        match self.config.output_format {
-            OutputFormat::Json => serde_json::to_string(&raw_pages)
-                .map_err(|e| JsError::new(&format!("json encode failed: {}", e))),
-            OutputFormat::Text => {
-                // For text output, concatenate the per-page `text` strings.
-                let mut out = String::new();
-                if let Some(arr) = raw_pages.as_array() {
-                    for (i, p) in arr.iter().enumerate() {
-                        if i > 0 {
-                            out.push_str("\n\n");
-                        }
-                        if let Some(s) = p.get("text").and_then(|v| v.as_str()) {
-                            out.push_str(s);
-                        }
-                    }
-                }
-                Ok(out)
-            }
-        }
-    }
 }

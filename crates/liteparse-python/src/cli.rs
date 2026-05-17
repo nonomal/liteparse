@@ -2,6 +2,7 @@ use clap::{Args, Parser, Subcommand};
 use liteparse::config::{LiteParseConfig, OutputFormat};
 use liteparse::conversion;
 use liteparse::extract;
+use liteparse::output::{json, text};
 use liteparse::parser::LiteParse;
 use liteparse::render;
 
@@ -141,7 +142,10 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             };
             let lp = LiteParse::new(config);
             let result = rt.block_on(lp.parse(&cmd.file))?;
-            let formatted = lp.format(&result)?;
+            let formatted = match lp.config().output_format {
+                OutputFormat::Json => json::format_json(&result.pages)?,
+                OutputFormat::Text => text::format_text(&result.pages),
+            };
             match cmd.output {
                 Some(path) => {
                     std::fs::write(&path, &formatted)?;
@@ -243,25 +247,34 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 match rt.block_on(lp.parse(file_path)) {
-                    Ok(result) => match lp.format(&result) {
-                        Ok(formatted) => {
-                            std::fs::write(&out_path, &formatted)?;
-                            success += 1;
-                            if !cmd.quiet {
-                                let elapsed = t0.elapsed().as_secs_f64() * 1000.0;
-                                eprintln!(
-                                    "[liteparse] {} → {} ({:.1}ms)",
-                                    file_path,
-                                    out_path.display(),
-                                    elapsed
-                                );
+                    Ok(result) => {
+                        let fmt_result: Result<String, Box<dyn std::error::Error>> =
+                            match lp.config().output_format {
+                                OutputFormat::Json => {
+                                    json::format_json(&result.pages).map_err(|e| e.into())
+                                }
+                                OutputFormat::Text => Ok(text::format_text(&result.pages)),
+                            };
+                        match fmt_result {
+                            Ok(formatted) => {
+                                std::fs::write(&out_path, &formatted)?;
+                                success += 1;
+                                if !cmd.quiet {
+                                    let elapsed = t0.elapsed().as_secs_f64() * 1000.0;
+                                    eprintln!(
+                                        "[liteparse] {} → {} ({:.1}ms)",
+                                        file_path,
+                                        out_path.display(),
+                                        elapsed
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[liteparse] error formatting {}: {}", file_path, e);
+                                errors += 1;
                             }
                         }
-                        Err(e) => {
-                            eprintln!("[liteparse] error formatting {}: {}", file_path, e);
-                            errors += 1;
-                        }
-                    },
+                    }
                     Err(e) => {
                         eprintln!("[liteparse] error parsing {}: {}", file_path, e);
                         errors += 1;

@@ -32,6 +32,15 @@ impl TextPage<'_> {
         }
     }
 
+    /// Like `char_at`, but skips the `char_count()` FFI bounds check.
+    /// The caller must ensure `index` is in `0..char_count`.
+    pub fn char_at_unchecked(&self, index: i32) -> TextChar<'_> {
+        TextChar {
+            text_page: self,
+            index,
+        }
+    }
+
     /// Count rectangular areas occupied by a text segment.
     /// Must be called before `rect()`.
     pub fn count_rects(&self, start: i32, count: i32) -> i32 {

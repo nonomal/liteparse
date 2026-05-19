@@ -233,6 +233,62 @@ impl Page<'_> {
     }
 }
 
+/// Pre-computed affine transform from PDF page space to viewport space.
+/// Avoids repeated FFI calls to `FPDF_PageToDevice` by probing 3 points
+/// once and deriving the 6 affine coefficients.
+#[derive(Debug, Clone, Copy)]
+pub struct ViewportTransform {
+    a: f32,
+    b: f32,
+    c: f32,
+    d: f32,
+    e: f32,
+    f: f32,
+}
+
+impl ViewportTransform {
+    /// Transform a single point from page space to viewport space.
+    #[inline]
+    pub fn transform_point(&self, page_x: f32, page_y: f32) -> (f32, f32) {
+        (
+            self.a * page_x + self.b * page_y + self.e,
+            self.c * page_x + self.d * page_y + self.f,
+        )
+    }
+
+    /// Transform a bounding rect from page space to viewport space.
+    #[inline]
+    pub fn transform_bounds(&self, page_bounds: &RectF) -> RectF {
+        let (ll_x, ll_y) = self.transform_point(page_bounds.left, page_bounds.bottom);
+        let (ur_x, ur_y) = self.transform_point(page_bounds.right, page_bounds.top);
+        RectF {
+            left: ll_x.min(ur_x),
+            top: ll_y.min(ur_y),
+            right: ll_x.max(ur_x),
+            bottom: ll_y.max(ur_y),
+        }
+    }
+}
+
+impl Page<'_> {
+    /// Build a `ViewportTransform` by probing 3 points through PDFium.
+    /// This makes 3 FFI calls total, after which all transforms are pure math.
+    pub fn viewport_transform(&self, view_box: &RectF) -> ViewportTransform {
+        let (e, f) = self.page_to_viewport(view_box, 0.0, 0.0);
+        let (ax_e, cx_f) = self.page_to_viewport(view_box, 1.0, 0.0);
+        let (by_e, dy_f) = self.page_to_viewport(view_box, 0.0, 1.0);
+
+        ViewportTransform {
+            a: ax_e - e,
+            b: by_e - e,
+            c: cx_f - f,
+            d: dy_f - f,
+            e,
+            f,
+        }
+    }
+}
+
 impl Drop for Page<'_> {
     fn drop(&mut self) {
         unsafe { pdfium_sys::FPDF_ClosePage(self.handle) };

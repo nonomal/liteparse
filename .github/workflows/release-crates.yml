@@ -56,9 +56,18 @@ jobs:
 
       - name: Publish to crates.io
         run: |
-          cargo publish -p liteparse-pdfium-sys --allow-dirty
-          cargo publish -p liteparse-pdfium --allow-dirty
-          cargo publish -p liteparse --allow-dirty
+          publish_if_new() {
+            local crate=$1
+            local version=$(cargo metadata --format-version 1 --no-deps | jq -r ".packages[] | select(.name == \"$crate\") | .version")
+            if cargo search "$crate" --limit 1 | grep -q "\"$version\""; then
+              echo "$crate@$version already published, skipping"
+            else
+              cargo publish -p "$crate" --allow-dirty
+            fi
+          }
+          publish_if_new liteparse-pdfium-sys
+          publish_if_new liteparse-pdfium
+          publish_if_new liteparse
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 

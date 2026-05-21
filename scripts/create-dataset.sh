@@ -68,16 +68,17 @@ while IFS= read -r -d '' file; do
     cp "$file" "$DEST_PATH"
   fi
 
-  # Parse with lit and capture JSON output
-  JSON_OUTPUT=""
+  # Parse with lit and capture JSON output to a temp file (avoids argument list too long)
+  JSON_TMPFILE=$(mktemp)
+  trap "rm -f '$JSON_TMPFILE'" EXIT
   PARSE_ERROR=""
-  if JSON_OUTPUT=$("$LIT" parse --format json --no-ocr -q "$file" 2>&1); then
+  if "$LIT" parse --format json --no-ocr -q "$file" > "$JSON_TMPFILE" 2>&1; then
     # Extract per-page data from JSON
-    PAGE_COUNT=$(echo "$JSON_OUTPUT" | jq '.pages | length')
+    PAGE_COUNT=$(jq '.pages | length' "$JSON_TMPFILE")
 
     if [ "$PAGE_COUNT" -eq 0 ]; then
       # No pages - single text entry
-      TEXT=$(echo "$JSON_OUTPUT" | jq -r '.text // ""')
+      TEXT=$(jq -r '.text // ""' "$JSON_TMPFILE")
       jq -nc \
         --arg fn "data/$REL_PATH" \
         --arg doc "$REL_PATH" \
@@ -88,24 +89,23 @@ while IFS= read -r -d '' file; do
       echo "  -> 1 text entry"
     else
       for i in $(seq 0 $((PAGE_COUNT - 1))); do
-        PAGE_JSON=$(echo "$JSON_OUTPUT" | jq ".pages[$i]")
-        PAGE_NUM=$(echo "$PAGE_JSON" | jq '.page')
-        PAGE_TEXT=$(echo "$PAGE_JSON" | jq -r '.text // ""')
+        PAGE_NUM=$(jq ".pages[$i].page" "$JSON_TMPFILE")
+        PAGE_TEXT=$(jq -r ".pages[$i].text // \"\"" "$JSON_TMPFILE")
 
         jq -nc \
           --arg fn "data/$REL_PATH" \
           --arg doc "$REL_PATH" \
           --argjson page "$PAGE_NUM" \
           --arg text "$PAGE_TEXT" \
-          --argjson json "$PAGE_JSON" \
-          '{file_name: $fn, document: $doc, page: $page, output_text: $text, output_json: $json}' \
+          --slurpfile json <(jq ".pages[$i]" "$JSON_TMPFILE") \
+          '{file_name: $fn, document: $doc, page: $page, output_text: $text, output_json: $json[0]}' \
           >> "$METADATA_FILE"
         TOTAL_ENTRIES=$((TOTAL_ENTRIES + 1))
       done
       echo "  -> $PAGE_COUNT pages"
     fi
   else
-    PARSE_ERROR="$JSON_OUTPUT"
+    PARSE_ERROR=$(cat "$JSON_TMPFILE")
     echo "  ERROR: $PARSE_ERROR"
     jq -nc \
       --arg fn "data/$REL_PATH" \
@@ -115,6 +115,7 @@ while IFS= read -r -d '' file; do
       >> "$METADATA_FILE"
     TOTAL_ENTRIES=$((TOTAL_ENTRIES + 1))
   fi
+  rm -f "$JSON_TMPFILE"
 done < <(find "$SOURCE_DOCS_DIR" -type f -print0 | sort -z)
 
 if [ "$TOTAL_ENTRIES" -eq 0 ]; then

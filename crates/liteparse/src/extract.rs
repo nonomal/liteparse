@@ -1,6 +1,6 @@
 use crate::error::LiteParseError;
-use crate::types::{Page as LitePage, PdfInput, TextItem};
-use pdfium::{Font, FontType, Library, Page, RectF, TextPage};
+use crate::types::{Page as LitePage, ParsedPage, PdfInput, TextItem};
+use pdfium::{Font, FontType, Library, Page, RectF, TextChar, TextPage, ViewportTransform};
 
 /// Extract pages from a PDF file and return them as structured data.
 pub fn extract_pages(
@@ -87,6 +87,245 @@ pub fn extract(pdf_path: &str, page_num: Option<u32>) -> Result<(), LiteParseErr
         println!("{}", serde_json::to_string(page)?);
     }
     Ok(())
+}
+
+// ── pypdf-compatible plain text extraction ─────────────────────────────────
+//
+// `pypdf`'s `extract_text()` "plain" mode walks the PDF content stream and
+// reconstructs text per text-showing operator. Its two core decisions
+// (see `pypdf/_text_extraction/crlf_space_check`) are:
+//   * insert "\n" when the text baseline moved vertically by more than
+//     0.8 * font_size between two operators;
+//   * insert " " when the horizontal gap between the end of the previous
+//     run and the start of the next exceeds roughly one space width.
+//
+// LiteParse uses PDFium's text page rather than a raw content-stream parser,
+// so this is a faithful *emulation*: we walk PDFium characters (which are
+// reported in content-stream order, just like pypdf processes operators) and
+// apply the same newline / space heuristics from each character's baseline
+// origin. Output will not be byte-identical to pypdf — the engines differ —
+// but line breaks and word grouping track closely.
+//
+// The two multipliers can be overridden at runtime for tuning via the
+// `LITEPARSE_PYPDF_NL_K` and `LITEPARSE_PYPDF_SPACE_K` environment variables.
+
+/// Extract pages as pypdf-style plain text. Skips OCR and grid projection.
+pub fn extract_pypdf_pages_from_input(
+    input: &PdfInput,
+    target_pages: Option<&[u32]>,
+    max_pages: usize,
+    password: Option<&str>,
+) -> Result<Vec<ParsedPage>, LiteParseError> {
+    let lib = Library::init();
+    let document = match input {
+        PdfInput::Path(path) => lib.load_document(path, password)?,
+        PdfInput::Bytes(data) => lib.load_document_from_bytes(data, password)?,
+    };
+    let page_count = document.page_count();
+    let mut pages = Vec::new();
+
+    for page_index in 0..page_count {
+        let page_number = page_index as u32 + 1;
+
+        if let Some(targets) = target_pages
+            && !targets.contains(&page_number)
+        {
+            continue;
+        }
+        if pages.len() >= max_pages {
+            break;
+        }
+
+        let page = document.page(page_index)?;
+        let text_page = page.text()?;
+        // Transform to viewport space so rotated (/Rotate) pages read
+        // left-to-right, top-to-bottom — matching pypdf's per-run orientation
+        // handling without needing the content-stream operators.
+        let view_box = page.view_box().unwrap_or(RectF {
+            left: 0.0,
+            top: page.height(),
+            right: page.width(),
+            bottom: 0.0,
+        });
+        let vp_xform = page.viewport_transform(&view_box);
+        let text = pypdf_page_text(&text_page, &vp_xform);
+
+        pages.push(ParsedPage {
+            page_number: page_number as usize,
+            page_width: page.width(),
+            page_height: page.height(),
+            text,
+            text_items: Vec::new(),
+        });
+    }
+
+    Ok(pages)
+}
+
+/// State carried from the previously emitted character.
+///
+/// All coordinates are in viewport space (top-left origin, Y grows down).
+struct PypdfPrev {
+    /// Right edge of the loose glyph box (≈ pen advance end).
+    right: f32,
+    /// Top of the loose glyph box (font-metric based — constant along a line).
+    top: f32,
+    /// Loose box height — used as the font-size proxy.
+    height: f32,
+}
+
+/// The placement of one character: loose box edges in viewport space.
+struct PypdfBox {
+    left: f32,
+    right: f32,
+    top: f32,
+    height: f32,
+}
+
+/// Loose glyph box for a character, in viewport space, falling back to the
+/// strict box.
+///
+/// `ch.font_size()` and `ch.matrix()` are unreliable here — many PDFs declare
+/// a 1pt font and scale it via the text matrix, so PDFium reports `font_size`
+/// as `1.0` and a single text-object origin shared by every glyph in the run.
+/// The loose box, by contrast, is per-character: horizontally it spans the pen
+/// advance, vertically it follows the font's ascent/descent (so it is constant
+/// along a text line). Transforming through the viewport transform also folds
+/// in the page's `/Rotate`, so rotated pages read normally.
+fn pypdf_char_box(ch: &TextChar, vp: &ViewportTransform) -> Option<PypdfBox> {
+    let page_box = match ch.loose_char_box() {
+        Some(b) if (b.top - b.bottom).abs() > 0.0 => b,
+        _ => {
+            let b = ch.char_box()?;
+            RectF {
+                left: b.left as f32,
+                top: b.top as f32,
+                right: b.right as f32,
+                bottom: b.bottom as f32,
+            }
+        }
+    };
+    let vb = vp.transform_bounds(&page_box);
+    let height = vb.bottom - vb.top;
+    if height <= 0.0 {
+        return None;
+    }
+    Some(PypdfBox {
+        left: vb.left,
+        right: vb.right,
+        top: vb.top,
+        height,
+    })
+}
+
+/// Reconstruct a single page's text in pypdf "plain" style.
+fn pypdf_page_text(text_page: &TextPage, vp: &ViewportTransform) -> String {
+    let char_count = text_page.char_count();
+    if char_count <= 0 {
+        return String::new();
+    }
+
+    // Newline when the line moved vertically by > nl_k * line height; space when
+    // the horizontal gap to the previous glyph >= space_k * line height.
+    let nl_k: f32 = env_f32("LITEPARSE_PYPDF_NL_K", 0.65);
+    let space_k: f32 = env_f32("LITEPARSE_PYPDF_SPACE_K", 0.18);
+    let debug = std::env::var("LITEPARSE_PYPDF_DEBUG").is_ok();
+
+    let mut out = String::new();
+    let mut prev: Option<PypdfPrev> = None;
+
+    for i in 0..char_count {
+        let ch = text_page.char_at_unchecked(i);
+        let unicode = ch.unicode();
+
+        // Skip null / invalid sentinels.
+        if unicode == 0 || unicode == 0xFFFE || unicode == 0xFFFF {
+            continue;
+        }
+        // Skip PDFium-synthesized characters — we insert our own spacing.
+        if ch.is_generated() {
+            continue;
+        }
+
+        // Map to a char, expanding the ligature control codes some fonts use.
+        let (c, tail): (char, &str) = match unicode {
+            0x02 => ('-', ""),
+            0x1A => ('f', "f"),
+            0x1B => ('f', "t"),
+            0x1C => ('f', "i"),
+            0x1D => ('T', "h"),
+            0x1E => ('f', "fi"),
+            0x1F => ('f', "l"),
+            _ => match char::from_u32(unicode) {
+                Some(m) => (m, ""),
+                None => continue,
+            },
+        };
+
+        // A literal newline in the content stream ends the line.
+        if c == '\n' || c == '\r' {
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            continue;
+        }
+
+        let Some(bx) = pypdf_char_box(&ch, vp) else {
+            if debug {
+                eprintln!(
+                    "char='{c}' NO-BOX loose={:?} strict={:?}",
+                    ch.loose_char_box().map(|b| (b.top, b.bottom)),
+                    ch.char_box().map(|b| (b.top, b.bottom))
+                );
+            }
+            // No geometry — append without spacing decisions.
+            out.push(c);
+            out.push_str(tail);
+            continue;
+        };
+
+        if let Some(p) = &prev {
+            let dy = p.top - bx.top;
+            let line_h = p.height.min(bx.height).max(1.0);
+            let gap = bx.left - p.right;
+            if debug {
+                eprintln!(
+                    "char='{c}' h={:.1} top={:.1} dy={dy:.2} gap={gap:.2}",
+                    bx.height, bx.top
+                );
+            }
+            if dy.abs() > nl_k * line_h {
+                if !out.is_empty() && !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            } else if gap >= space_k * line_h
+                && !out.is_empty()
+                && !out.ends_with(' ')
+                && !out.ends_with('\n')
+            {
+                out.push(' ');
+            }
+        }
+
+        out.push(c);
+        out.push_str(tail);
+
+        prev = Some(PypdfPrev {
+            right: bx.right,
+            top: bx.top,
+            height: bx.height,
+        });
+    }
+
+    out
+}
+
+/// Read an `f32` from an environment variable, falling back to `default`.
+fn env_f32(key: &str, default: f32) -> f32 {
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
 }
 
 /// Check if the page has any visible (non-render-mode-3) printable characters.

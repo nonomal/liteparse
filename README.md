@@ -36,7 +36,7 @@ hard stuff so your models see clean, structured data and markdown.
   - **HTTP Servers**: Plug in any OCR server (EasyOCR, PaddleOCR, custom)
   - **Standard API**: Simple, well-defined OCR API specification
 - **Screenshot Generation**: Generate high-quality page screenshots for LLM agents
-- **Multiple Output Formats**: JSON and Text
+- **Multiple Output Formats**: JSON, Text, and pypdf-compatible plain text
 - **Bounding Boxes**: Precise text positioning information
 - **Multi-language**: Use from Rust, Node.js/TypeScript, Python, or the browser (WASM)
 - **Multi-platform**: Linux, macOS (Intel/ARM), Windows
@@ -138,6 +138,9 @@ lit parse document.pdf
 # Parse with specific format
 lit parse document.pdf --format json -o output.json
 
+# pypdf-compatible plain text (emulates pypdf's extract_text(), no OCR/projection)
+lit parse document.pdf --format pypdf
+
 # Parse specific pages
 lit parse document.pdf --target-pages "1-5,10,15-20"
 
@@ -180,7 +183,7 @@ lit parse [OPTIONS] <file>
 
 Options:
   -o, --output <file>          Output file path
-      --format <format>        Output format: json|text [default: text]
+      --format <format>        Output format: json|text|pypdf [default: text]
       --no-ocr                 Disable OCR
       --ocr-language <lang>    OCR language, Tesseract format [default: eng]
       --ocr-server-url <url>   HTTP OCR server URL (uses Tesseract if not provided)
@@ -201,7 +204,7 @@ Options:
 lit batch-parse [OPTIONS] <input-dir> <output-dir>
 
 Options:
-      --format <format>        Output format: json|text [default: text]
+      --format <format>        Output format: json|text|pypdf [default: text]
       --no-ocr                 Disable OCR
       --ocr-language <lang>    OCR language [default: eng]
       --ocr-server-url <url>   HTTP OCR server URL

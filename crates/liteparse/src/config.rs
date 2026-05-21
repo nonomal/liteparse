@@ -35,6 +35,9 @@ pub struct LiteParseConfig {
 pub enum OutputFormat {
     Json,
     Text,
+    /// Plain text reconstructed to closely match `pypdf`'s `extract_text()`
+    /// "plain" mode. Skips OCR and grid projection. Behind the `--format pypdf` flag.
+    Pypdf,
 }
 
 impl Default for LiteParseConfig {

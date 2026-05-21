@@ -1,4 +1,4 @@
-use crate::config::{LiteParseConfig, parse_target_pages};
+use crate::config::{LiteParseConfig, OutputFormat, parse_target_pages};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::conversion;
 use crate::error::LiteParseError;
@@ -87,6 +87,31 @@ impl LiteParse {
             .map(|s| parse_target_pages(s))
             .transpose()
             .map_err(|e| format!("invalid --target-pages: {}", e))?;
+
+        // pypdf-compatible mode: skip OCR and grid projection entirely and
+        // reconstruct plain text directly from PDFium characters.
+        if self.config.output_format == OutputFormat::Pypdf {
+            let pages = extract::extract_pypdf_pages_from_input(
+                &input,
+                target_pages.as_deref(),
+                self.config.max_pages,
+                self.config.password.as_deref(),
+            )?;
+            log(&format!(
+                "[liteparse] pypdf extract: {:.1}ms ({} pages)",
+                t0.elapsed().as_secs_f64() * 1000.0,
+                pages.len()
+            ));
+            let full_text = pages
+                .iter()
+                .map(|p| p.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Ok(ParseResult {
+                pages,
+                text: full_text,
+            });
+        }
 
         // Extract text items from PDF pages
         let mut pages = extract::extract_pages_from_input(

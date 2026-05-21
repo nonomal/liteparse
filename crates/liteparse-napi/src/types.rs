@@ -64,6 +64,7 @@ impl JsLiteParseConfig {
         if let Some(v) = self.output_format {
             cfg.output_format = match v.as_str() {
                 "text" => OutputFormat::Text,
+                "pypdf" => OutputFormat::Pypdf,
                 _ => OutputFormat::Json,
             };
         }
@@ -94,6 +95,7 @@ impl JsLiteParseConfig {
             output_format: Some(match cfg.output_format {
                 OutputFormat::Json => "json".to_string(),
                 OutputFormat::Text => "text".to_string(),
+                OutputFormat::Pypdf => "pypdf".to_string(),
             }),
             preserve_very_small_text: Some(cfg.preserve_very_small_text),
             password: cfg.password.clone(),

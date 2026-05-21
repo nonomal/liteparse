@@ -252,6 +252,7 @@ impl LiteParse {
         if let Some(v) = output_format {
             cfg.output_format = match v.as_str() {
                 "text" => OutputFormat::Text,
+                "pypdf" => OutputFormat::Pypdf,
                 _ => OutputFormat::Json,
             };
         }

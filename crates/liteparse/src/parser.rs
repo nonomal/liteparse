@@ -120,13 +120,28 @@ impl LiteParse {
             .transpose()
             .map_err(|e| format!("invalid --target-pages: {}", e))?;
 
-        // Extract text items from PDF pages
-        let mut pages = extract::extract_pages_from_input(
-            &validated_input,
-            target_pages.as_deref(),
-            self.config.max_pages,
-            self.config.password.as_deref(),
-        )?;
+        // Extract text (and pre-render OCR pages in one PDF load when OCR is on).
+        let password = self.config.password.as_deref();
+        let (mut pages, ocr_rendered) = if self.config.ocr_enabled {
+            let document =
+                extract::load_document_from_input(&validated_input, password)?;
+            let pages = extract::extract_pages_from_document(
+                &document,
+                target_pages.as_deref(),
+                self.config.max_pages,
+            )?;
+            let rendered =
+                ocr_merge::render_pages_for_ocr(&document, &pages, self.config.dpi)?;
+            (pages, rendered)
+        } else {
+            let pages = extract::extract_pages_from_input(
+                &validated_input,
+                target_pages.as_deref(),
+                self.config.max_pages,
+                password,
+            )?;
+            (pages, Vec::new())
+        };
         let t1 = web_time::Instant::now();
         log(&format!(
             "[liteparse] extract: {:.1}ms ({} pages)",
@@ -165,9 +180,9 @@ impl LiteParse {
                     );
                 }
             };
-            ocr_merge::ocr_and_merge_pages_from_input(
+            ocr_merge::ocr_and_merge_rendered(
                 &mut pages,
-                &validated_input,
+                ocr_rendered,
                 self.config.dpi,
                 engine,
                 &self.config.ocr_language,

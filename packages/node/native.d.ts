@@ -64,7 +64,7 @@ export declare class LiteParse {
   /** Parse a document. Accepts a file path (string) or raw PDF bytes (Buffer). */
   parse(input: string | Buffer): Promise<JsParseResult>
   /** Take screenshots of document pages. Returns PNG image buffers. */
-  screenshot(input: string, pageNumbers?: Array<number> | undefined | null): Array<JsScreenshotResult>
+  screenshot(input: string | Buffer, pageNumbers?: Array<number> | undefined | null): Promise<Array<JsScreenshotResult>>
   /** Get the current configuration. */
   get config(): JsLiteParseConfig
 }

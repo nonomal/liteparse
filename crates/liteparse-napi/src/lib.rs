@@ -46,59 +46,37 @@ impl LiteParse {
     }
 
     /// Take screenshots of document pages. Returns PNG image buffers.
+    ///
+    /// Non-PDF files are automatically converted to PDF before rendering when
+    /// LibreOffice/ImageMagick are available.
     #[napi]
-    pub fn screenshot(
+    pub async fn screenshot(
         &self,
-        input: String,
+        input: Either<String, Buffer>,
         page_numbers: Option<Vec<u32>>,
     ) -> Result<Vec<JsScreenshotResult>> {
-        let dpi = self.config.dpi;
-        let lib = pdfium::Library::init();
-        let document = lib
-            .load_document(&input, self.config.password.as_deref())
-            .map_err(|e| Error::from_reason(e.to_string()))?;
-        let page_count = document.page_count() as u32;
+        use liteparse::types::PdfInput;
 
-        let pages: Vec<u32> = match page_numbers {
-            Some(nums) => nums,
-            None => (1..=page_count).collect(),
+        let pdf_input = match input {
+            Either::A(path) => PdfInput::Path(path),
+            Either::B(buf) => PdfInput::Bytes(buf.to_vec()),
         };
 
-        let mut results = Vec::with_capacity(pages.len());
-        for page_num in pages {
-            if page_num < 1 || page_num > page_count {
-                return Err(Error::from_reason(format!(
-                    "page {page_num} out of range (document has {page_count} pages)"
-                )));
-            }
-            let page = document
-                .page((page_num - 1) as i32)
-                .map_err(|e| Error::from_reason(e.to_string()))?;
-            let bitmap = page
-                .render(dpi)
-                .map_err(|e| Error::from_reason(e.to_string()))?;
+        let results = self
+            .inner
+            .screenshot_input(pdf_input, page_numbers)
+            .await
+            .map_err(|e| Error::from_reason(e.to_string()))?;
 
-            let width = bitmap.width() as u32;
-            let height = bitmap.height() as u32;
-            let rgba = bitmap.to_rgba();
-
-            // Encode as PNG into a buffer
-            let mut png_buf: Vec<u8> = Vec::new();
-            let encoder = image::codecs::png::PngEncoder::new(&mut png_buf);
-            use image::ImageEncoder;
-            encoder
-                .write_image(&rgba, width, height, image::ColorType::Rgba8.into())
-                .map_err(|e| Error::from_reason(format!("PNG encode failed: {e}")))?;
-
-            results.push(JsScreenshotResult {
-                page_num,
-                width,
-                height,
-                image_buffer: png_buf.into(),
-            });
-        }
-
-        Ok(results)
+        Ok(results
+            .into_iter()
+            .map(|r| JsScreenshotResult {
+                page_num: r.page_num,
+                width: r.width,
+                height: r.height,
+                image_buffer: r.image_bytes.into(),
+            })
+            .collect())
     }
 
     /// Get the current configuration.

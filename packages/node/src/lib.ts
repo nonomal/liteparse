@@ -115,11 +115,17 @@ export class LiteParse {
     };
   }
 
-  screenshot(
-    input: string,
+  async screenshot(
+    input: LiteParseInput,
     pageNumbers?: number[],
-  ): ScreenshotResult[] {
-    return this._native.screenshot(input, pageNumbers ?? null).map((r) => ({
+  ): Promise<ScreenshotResult[]> {
+    const nativeInput =
+      typeof input === "string" ? input : Buffer.from(input);
+    const results = await this._native.screenshot(
+      nativeInput,
+      pageNumbers ?? null,
+    );
+    return results.map((r) => ({
       pageNum: r.pageNum,
       width: r.width,
       height: r.height,

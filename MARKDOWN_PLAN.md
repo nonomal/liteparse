@@ -252,7 +252,7 @@ Sensible defaults so users can just pass `-f markdown` and get good output. Deba
 ## Surface area
 
 - `crates/liteparse/src/output/markdown.rs` — new.
-- `crates/liteparse/src/markdown_layout.rs` — new.
+- `crates/liteparse/src/markdown_layout/` — new module directory: `mod.rs` (public re-exports), `blocks.rs`, `inline.rs`, `tables.rs`, `headings.rs`, `lists.rs`, `paragraphs.rs`, `repetition.rs`, `hr.rs`, `classify.rs`.
 - `crates/liteparse/src/types.rs` — add `Block`, `Span`, `TableBlock`.
 - `crates/liteparse/src/config.rs` — add `OutputFormat::Markdown`, `MarkdownConfig`.
 - `crates/liteparse/src/projection.rs` — expose `ProjectedLine` (additive).

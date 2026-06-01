@@ -13,7 +13,7 @@ use crate::output::markdown;
 use crate::projection;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::render;
-use crate::types::{ParsedPage, PdfInput};
+use crate::types::{ExtractedImage, OutlineTarget, ParsedPage, PdfInput};
 
 /// Result of parsing a document.
 pub struct ParseResult {
@@ -21,6 +21,14 @@ pub struct ParseResult {
     pub pages: Vec<ParsedPage>,
     /// Full document text, concatenated from all pages.
     pub text: String,
+    /// Document outline (bookmarks) when present. Used by the markdown
+    /// emitter as a high-priority heading source on untagged PDFs.
+    pub outline: Vec<OutlineTarget>,
+    /// Raster images extracted from the document. Empty unless the parser
+    /// was configured with `ImageMode::Embed`. Each entry carries the same
+    /// `id` the markdown emitter referenced in `![](image_{id}.png)`, so the
+    /// caller can match them up without parsing markdown.
+    pub images: Vec<ExtractedImage>,
 }
 
 /// Result of rendering a single page screenshot.
@@ -99,13 +107,21 @@ impl LiteParse {
             .map_err(|e| format!("invalid --target-pages: {}", e))?;
 
         // Extract text (and pre-render OCR pages in one PDF load when OCR is on).
+        // The Document handle isn't Send, so we open it, pull every bit of
+        // document-level state we need, and drop it before any `.await`.
         let password = self.config.password.as_deref();
-        let (mut pages, ocr_rendered) = if self.config.ocr_enabled {
+        let render_images = matches!(
+            self.config.image_mode,
+            crate::config::ImageMode::Embed
+        );
+        let (pages, ocr_rendered, outline, images) = {
             let document = extract::load_document_from_input(&validated_input, password)?;
-            let pages = extract::extract_pages_from_document(
+            let outline = extract::extract_outline(&document);
+            let (pages, images) = extract::extract_pages_and_images(
                 &document,
                 target_pages.as_deref(),
                 self.config.max_pages,
+                render_images,
             )?;
             let t_extract = web_time::Instant::now();
             log(&format!(
@@ -113,30 +129,23 @@ impl LiteParse {
                 t_extract.duration_since(t0).as_secs_f64() * 1000.0,
                 pages.len()
             ));
-            let rendered = ocr_merge::render_pages_for_ocr(&document, &pages, self.config.dpi)?;
-            log(&format!(
-                "[liteparse] ocr render: {:.1}ms ({} pages)",
-                web_time::Instant::now()
-                    .duration_since(t_extract)
-                    .as_secs_f64()
-                    * 1000.0,
-                rendered.len()
-            ));
-            (pages, rendered)
-        } else {
-            let pages = extract::extract_pages_from_input(
-                &validated_input,
-                target_pages.as_deref(),
-                self.config.max_pages,
-                password,
-            )?;
-            log(&format!(
-                "[liteparse] extract: {:.1}ms ({} pages)",
-                web_time::Instant::now().duration_since(t0).as_secs_f64() * 1000.0,
-                pages.len()
-            ));
-            (pages, Vec::new())
+            let rendered = if self.config.ocr_enabled {
+                let r = ocr_merge::render_pages_for_ocr(&document, &pages, self.config.dpi)?;
+                log(&format!(
+                    "[liteparse] ocr render: {:.1}ms ({} pages)",
+                    web_time::Instant::now()
+                        .duration_since(t_extract)
+                        .as_secs_f64()
+                        * 1000.0,
+                    r.len()
+                ));
+                r
+            } else {
+                Vec::new()
+            };
+            (pages, rendered, outline, images)
         };
+        let mut pages = pages;
         let t1 = web_time::Instant::now();
 
         // OCR pass
@@ -195,7 +204,7 @@ impl LiteParse {
         ));
 
         let full_text = if self.config.output_format == crate::config::OutputFormat::Markdown {
-            let md = markdown::format_markdown(&parsed_pages);
+            let md = markdown::format_markdown(&parsed_pages, &outline, self.config.image_mode);
             let t3 = web_time::Instant::now();
             log(&format!(
                 "[liteparse] markdown: {:.1}ms",
@@ -216,6 +225,8 @@ impl LiteParse {
         Ok(ParseResult {
             pages: parsed_pages,
             text: full_text,
+            outline,
+            images,
         })
     }
 

@@ -1,6 +1,6 @@
 use napi_derive::napi;
 
-use liteparse::config::{LiteParseConfig, OutputFormat};
+use liteparse::config::{ImageMode, LiteParseConfig, OutputFormat};
 use liteparse::parser::ParseResult;
 use liteparse::types::{ParsedPage, TextItem};
 
@@ -35,6 +35,10 @@ pub struct JsLiteParseConfig {
     pub quiet: Option<bool>,
     /// Number of concurrent OCR workers (default: CPU cores - 1).
     pub num_workers: Option<u32>,
+    /// How to surface raster images in markdown output: "off", "placeholder"
+    /// (default — emits `![](image_pN_K.png)` references with no bytes), or
+    /// "embed" (also returns each image's PNG bytes on `images`).
+    pub image_mode: Option<String>,
 }
 
 impl JsLiteParseConfig {
@@ -80,6 +84,13 @@ impl JsLiteParseConfig {
         if let Some(v) = self.num_workers {
             cfg.num_workers = v as usize;
         }
+        if let Some(v) = self.image_mode {
+            cfg.image_mode = match v.as_str() {
+                "off" | "none" => ImageMode::Off,
+                "embed" => ImageMode::Embed,
+                _ => ImageMode::Placeholder,
+            };
+        }
         cfg
     }
 
@@ -101,6 +112,11 @@ impl JsLiteParseConfig {
             password: cfg.password.clone(),
             quiet: Some(cfg.quiet),
             num_workers: Some(cfg.num_workers as u32),
+            image_mode: Some(match cfg.image_mode {
+                ImageMode::Off => "off".to_string(),
+                ImageMode::Placeholder => "placeholder".to_string(),
+                ImageMode::Embed => "embed".to_string(),
+            }),
         }
     }
 }
@@ -186,6 +202,16 @@ impl JsParsedPage {
 pub struct JsParseResult {
     pub pages: Vec<JsParsedPage>,
     pub text: String,
+    pub images: Vec<JsExtractedImage>,
+}
+
+#[napi(object)]
+#[derive(Clone)]
+pub struct JsExtractedImage {
+    pub id: String,
+    pub page: u32,
+    pub format: String,
+    pub bytes: napi::bindgen_prelude::Buffer,
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +232,16 @@ impl JsParseResult {
         Self {
             pages: result.pages.iter().map(JsParsedPage::from_rust).collect(),
             text: result.text.clone(),
+            images: result
+                .images
+                .iter()
+                .map(|img| JsExtractedImage {
+                    id: img.id.clone(),
+                    page: img.page,
+                    format: img.format.clone(),
+                    bytes: img.bytes.clone().into(),
+                })
+                .collect(),
         }
     }
 }

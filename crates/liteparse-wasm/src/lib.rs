@@ -156,6 +156,19 @@ struct JsParsedPage<'a> {
 struct JsParseResult<'a> {
     pages: Vec<JsParsedPage<'a>>,
     text: &'a str,
+    images: Vec<JsExtractedImage<'a>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsExtractedImage<'a> {
+    id: &'a str,
+    page: u32,
+    format: &'a str,
+    /// Serialized as a JS `number[]`. Callers that want a Uint8Array can
+    /// wrap with `new Uint8Array(image.bytes)`. (Could be upgraded to a real
+    /// Uint8Array later by switching to a hand-rolled to_value path.)
+    bytes: &'a [u8],
 }
 
 // ---------------------------------------------------------------------------
@@ -332,9 +345,20 @@ impl LiteParse {
             })
             .collect();
 
+        let js_images: Vec<JsExtractedImage> = result
+            .images
+            .iter()
+            .map(|img| JsExtractedImage {
+                id: &img.id,
+                page: img.page,
+                format: &img.format,
+                bytes: &img.bytes,
+            })
+            .collect();
         let js_result = JsParseResult {
             pages: js_pages,
             text: &result.text,
+            images: js_images,
         };
 
         serde_wasm_bindgen::to_value(&js_result)

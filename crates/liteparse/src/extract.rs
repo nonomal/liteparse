@@ -1,5 +1,9 @@
 use crate::error::LiteParseError;
-use crate::types::{GraphicPrimitive, Page as LitePage, PdfInput, Rect, TextItem};
+use crate::render::encode_png;
+use crate::types::{
+    ExtractedImage, GraphicPrimitive, ImageRef, OutlineTarget, Page as LitePage, PdfInput, Rect,
+    StructNode, TextItem,
+};
 use pdfium::{Document, Font, FontType, Library, Page, PathObject, RectF, SegmentKind, TextPage};
 
 /// Open a PDF from path or bytes with an optional password.
@@ -31,8 +35,23 @@ pub(crate) fn extract_pages_from_document(
     target_pages: Option<&[u32]>,
     max_pages: usize,
 ) -> Result<Vec<LitePage>, LiteParseError> {
+    Ok(extract_pages_and_images(document, target_pages, max_pages, false)?.0)
+}
+
+/// Same as `extract_pages_from_document` but optionally also renders every
+/// raster image object to PNG bytes (when `render_images = true`). Returned
+/// `ExtractedImage`s carry the same ids the markdown emitter will reference,
+/// so callers can match them up by id. When `render_images = false` the
+/// returned image vec is always empty.
+pub(crate) fn extract_pages_and_images(
+    document: &Document,
+    target_pages: Option<&[u32]>,
+    max_pages: usize,
+    render_images: bool,
+) -> Result<(Vec<LitePage>, Vec<ExtractedImage>), LiteParseError> {
     let page_count = document.page_count();
     let mut pages = Vec::new();
+    let mut images: Vec<ExtractedImage> = Vec::new();
 
     for page_index in 0..page_count {
         let page_number = page_index as u32 + 1;
@@ -57,6 +76,12 @@ pub(crate) fn extract_pages_from_document(
         });
         let text_items = extract_page_text_items(&page, &text_page, &view_box)?;
         let graphics = extract_page_graphics(&page, &view_box);
+        let struct_nodes = extract_page_struct_nodes(&page, &view_box);
+        let image_refs = extract_page_image_refs(&page, page_number);
+
+        if render_images && !image_refs.is_empty() {
+            images.extend(render_page_images(&page, page_number, &image_refs));
+        }
 
         pages.push(LitePage {
             page_number: page_number as usize,
@@ -64,10 +89,48 @@ pub(crate) fn extract_pages_from_document(
             page_height: page.height(),
             text_items,
             graphics,
+            struct_nodes,
+            image_refs,
         });
     }
 
-    Ok(pages)
+    Ok((pages, images))
+}
+
+/// Walk the document outline (bookmarks). Returns entries in pre-order.
+/// Empty when the PDF has no outline.
+pub(crate) fn extract_outline(document: &Document) -> Vec<OutlineTarget> {
+    document
+        .outline()
+        .into_iter()
+        .filter_map(|e| {
+            Some(OutlineTarget {
+                level: e.level,
+                title: e.title,
+                page_index: e.page_index?,
+                y_pdf: e.y,
+            })
+        })
+        .collect()
+}
+
+/// Walk the page's structure tree (tagged PDFs). Returns nodes in pre-order;
+/// empty when the page is untagged.
+fn extract_page_struct_nodes(page: &Page, view_box: &RectF) -> Vec<StructNode> {
+    page.struct_tree(view_box)
+        .into_iter()
+        .map(|n| StructNode {
+            role: n.role,
+            mcids: n.mcids,
+            bbox: n.bbox.map(|b| Rect {
+                x: b.left,
+                y: b.top,
+                width: b.right - b.left,
+                height: b.bottom - b.top,
+            }),
+            alt_text: n.alt_text,
+        })
+        .collect()
 }
 
 /// Extract raw text items and print each page as a JSON-line object to stdout.
@@ -135,6 +198,76 @@ fn should_skip_invisible(text_page: &TextPage, char_count: i32) -> bool {
     let total = visible + invisible;
     let invisible_ratio = invisible as f64 / total as f64;
     invisible_ratio < 0.3
+}
+
+/// Minimum image extent (in PDF points) below which we ignore the image
+/// object. Filters out hairline rasterized rules, icons embedded in glyphs,
+/// and other sub-25pt fragments that would otherwise pollute the figure
+/// stream. Matches the threshold used by `ocr_merge::has_images`.
+const IMAGE_MIN_SIZE_PT: f32 = 25.0;
+
+/// Max fraction of the page each axis can cover. Drops full-page background
+/// images (scanned pages, watermarks).
+const IMAGE_MAX_COVERAGE: f32 = 0.9;
+
+/// Render every image referenced in `refs` to PNG bytes using
+/// `Page::render_image_object`. Returns one `ExtractedImage` per ref. Used by
+/// the parser only when `ImageMode::Embed` is configured — otherwise the
+/// extraction loop skips this entirely. Failures for individual images are
+/// silently dropped (a malformed embedded image shouldn't fail the whole
+/// parse).
+pub(crate) fn render_page_images(
+    page: &Page,
+    page_number: u32,
+    refs: &[ImageRef],
+) -> Vec<ExtractedImage> {
+    let mut out = Vec::with_capacity(refs.len());
+    for r in refs {
+        let bmp = match page.render_image_object(r.obj_index) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let w = bmp.width().max(0) as u32;
+        let h = bmp.height().max(0) as u32;
+        if w == 0 || h == 0 {
+            continue;
+        }
+        let rgba = bmp.to_rgba();
+        let png = match encode_png(&rgba, w, h) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        out.push(ExtractedImage {
+            id: r.id.clone(),
+            page: page_number,
+            bbox: r.bbox.clone(),
+            format: "png".into(),
+            bytes: png,
+        });
+    }
+    out
+}
+
+/// Walk image objects on a page and return a stable per-page `ImageRef` for
+/// each one. `obj_index` is the index among image-typed page objects (not all
+/// page objects), so a later embed pass can pull pixel bytes via
+/// `Page::render_image_object`. IDs are scoped to the page number so they
+/// remain stable across runs.
+fn extract_page_image_refs(page: &Page, page_number: u32) -> Vec<ImageRef> {
+    page.image_bounds(IMAGE_MIN_SIZE_PT, IMAGE_MAX_COVERAGE)
+        .into_iter()
+        .enumerate()
+        .map(|(i, b)| ImageRef {
+            id: format!("p{}_{}", page_number, i),
+            bbox: Rect {
+                x: b.x,
+                y: b.y,
+                width: b.width,
+                height: b.height,
+            },
+            obj_index: i,
+        })
+        .collect()
 }
 
 /// Extract simplified vector graphics from a page. We keep only what the

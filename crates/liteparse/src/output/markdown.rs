@@ -1,8 +1,9 @@
+use crate::config::ImageMode;
 use crate::markdown_layout::{
     build_heading_map, classify_page_with_filters, compute_body_size, compute_header_footer_set,
     render_blocks,
 };
-use crate::types::ParsedPage;
+use crate::types::{OutlineTarget, ParsedPage};
 
 /// Format parsed pages as markdown.
 ///
@@ -15,7 +16,11 @@ use crate::types::ParsedPage;
 /// `<!-- page N -->` marker. Pages that contain no projected lines (e.g. blank
 /// or fully-OCR pages without font-size info) fall back to the projected text
 /// wrapped in a fenced block so we never silently drop content.
-pub fn format_markdown(pages: &[ParsedPage]) -> String {
+pub fn format_markdown(
+    pages: &[ParsedPage],
+    outline: &[OutlineTarget],
+    image_mode: ImageMode,
+) -> String {
     if pages.is_empty() {
         return String::new();
     }
@@ -43,7 +48,21 @@ pub fn format_markdown(pages: &[ParsedPage]) -> String {
             continue;
         }
 
-        let blocks = classify_page_with_filters(page, &heading_map, &header_footer);
+        // Filter outline entries to this page so the classifier's y/title
+        // match is a O(entries_on_page) scan per line, not O(whole doc).
+        let target_index = (page.page_number as i32).saturating_sub(1);
+        let page_outline: Vec<OutlineTarget> = outline
+            .iter()
+            .filter(|e| e.page_index == target_index)
+            .cloned()
+            .collect();
+        let blocks = classify_page_with_filters(
+            page,
+            &heading_map,
+            &header_footer,
+            &page_outline,
+            image_mode,
+        );
         out.push_str(&render_blocks(&blocks));
     }
     out
@@ -88,12 +107,14 @@ mod tests {
             regions: crate::types::Region::default(),
             graphics: vec![],
             figures: vec![],
+            struct_nodes: vec![],
+            image_refs: vec![],
         }
     }
 
     #[test]
     fn test_empty() {
-        assert_eq!(format_markdown(&[]), "");
+        assert_eq!(format_markdown(&[], &[], ImageMode::Placeholder), "");
     }
 
     #[test]
@@ -108,8 +129,10 @@ mod tests {
             regions: crate::types::Region::default(),
             graphics: vec![],
             figures: vec![],
+            struct_nodes: vec![],
+            image_refs: vec![],
         };
-        let out = format_markdown(&[p]);
+        let out = format_markdown(&[p], &[], ImageMode::Placeholder);
         assert!(out.contains("```text"));
         assert!(out.contains("hello"));
         assert!(out.contains("<!-- page 1 -->"));
@@ -140,7 +163,7 @@ mod tests {
                 ),
             ],
         );
-        let out = format_markdown(&[p]);
+        let out = format_markdown(&[p], &[], ImageMode::Placeholder);
         assert!(out.contains("# My Title For This Test Document"));
         assert!(out.contains("First sentence of body prose here."));
     }
@@ -149,7 +172,7 @@ mod tests {
     fn test_multi_page_separator() {
         let a = page_with(1, vec![line("A page.", 50.0, 80.0, 10.0, 10.0)]);
         let b = page_with(2, vec![line("B page.", 50.0, 80.0, 10.0, 10.0)]);
-        let out = format_markdown(&[a, b]);
+        let out = format_markdown(&[a, b], &[], ImageMode::Placeholder);
         assert!(out.contains("-----"));
         assert!(out.find("A page.").unwrap() < out.find("B page.").unwrap());
     }

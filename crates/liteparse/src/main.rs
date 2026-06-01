@@ -89,6 +89,21 @@ struct ParseCommand {
     /// Number of concurrent OCR workers (default: CPU cores - 1)
     #[arg(long)]
     num_workers: Option<usize>,
+
+    /// How to surface raster images in markdown output:
+    /// `off` strips them, `placeholder` (default) emits `![](image_pN_K.png)`
+    /// references in reading order, `embed` extracts each image's PNG bytes
+    /// and writes them next to the markdown output when `--image-output-dir`
+    /// is set.
+    #[arg(long, default_value = "placeholder")]
+    image_mode: String,
+
+    /// Directory to write embedded images to when `--image-mode embed` is
+    /// set. Each image is written as `image_{id}.png` to match the
+    /// references in the markdown output. Has no effect for other image
+    /// modes. Created if missing.
+    #[arg(long)]
+    image_output_dir: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -197,6 +212,19 @@ fn parse_output_format(s: &str) -> Result<OutputFormat, String> {
     }
 }
 
+fn parse_image_mode(s: &str) -> Result<liteparse::config::ImageMode, String> {
+    use liteparse::config::ImageMode;
+    match s.to_lowercase().as_str() {
+        "off" | "none" => Ok(ImageMode::Off),
+        "placeholder" => Ok(ImageMode::Placeholder),
+        "embed" => Ok(ImageMode::Embed),
+        _ => Err(format!(
+            "unknown image-mode '{}', expected 'off', 'placeholder', or 'embed'",
+            s
+        )),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -204,6 +232,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Parse(cmd) => {
             let format = parse_output_format(&cmd.format)?;
+            let image_mode = parse_image_mode(&cmd.image_mode)?;
 
             let mut config = LiteParseConfig {
                 ocr_language: cmd.ocr_language,
@@ -217,6 +246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 password: cmd.password,
                 quiet: cmd.quiet,
                 ocr_server_url: cmd.ocr_server_url,
+                image_mode,
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {
@@ -230,6 +260,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 OutputFormat::Text => text::format_text(&result.pages),
                 OutputFormat::Markdown => result.text.clone(),
             };
+            if let Some(dir) = cmd.image_output_dir.as_deref()
+                && !result.images.is_empty()
+            {
+                std::fs::create_dir_all(dir)?;
+                for img in &result.images {
+                    let path = format!("{}/image_{}.{}", dir, img.id, img.format);
+                    std::fs::write(&path, &img.bytes)?;
+                }
+                if !cmd.quiet {
+                    eprintln!(
+                        "[liteparse] wrote {} image(s) to {}",
+                        result.images.len(),
+                        dir
+                    );
+                }
+            }
 
             match cmd.output {
                 Some(path) => {

@@ -27,6 +27,28 @@ pub struct LiteParseConfig {
     pub quiet: bool,
     /// Number of concurrent OCR workers. Defaults to (number of CPU cores - 1), minimum 1.
     pub num_workers: usize,
+    /// Controls how raster images are surfaced in markdown output. Has no
+    /// effect on JSON / text outputs.
+    pub image_mode: ImageMode,
+}
+
+/// Image handling for the markdown emitter.
+///
+/// * `Off` — strip image references entirely.
+/// * `Placeholder` (default) — emit `![](image_pN_K.png)` references in
+///   reading order at each image's y position, but do **not** extract or
+///   return pixel bytes. Keeps response size small while letting the LLM see
+///   where figures live in the document.
+/// * `Embed` — same references, plus bytes returned via `ParseResult.images`.
+///   Opt-in because pixel bytes can dwarf the text payload on image-heavy
+///   PDFs. (Bytes plumbing lands in stage 11b — current variant is parsed but
+///   behaves like `Placeholder` until then.)
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ImageMode {
+    Off,
+    Placeholder,
+    Embed,
 }
 
 /// Supported output formats.
@@ -53,6 +75,7 @@ impl Default for LiteParseConfig {
             password: None,
             quiet: false,
             num_workers: default_num_workers(),
+            image_mode: ImageMode::Placeholder,
         }
     }
 }

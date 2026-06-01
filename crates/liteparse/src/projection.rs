@@ -2680,6 +2680,8 @@ pub fn project_pages_to_grid(pages: Vec<Page>) -> Vec<ParsedPage> {
                 regions,
                 graphics: page.graphics,
                 figures,
+                struct_nodes: page.struct_nodes,
+                image_refs: page.image_refs,
             }
         })
         .collect()
@@ -2802,6 +2804,30 @@ const XY_MIN_LINES_PER_H_SIDE: usize = 2;
 /// chosen. Tie-breaks in favor of horizontal so pages are sliced into bands
 /// before columns — matches natural reading order.
 const XY_V_PREFERENCE_MARGIN: f32 = 1.1;
+
+/// Bucket width used by the column-start histogram fallback. 5pt is finer
+/// than typical inter-column gutters (8–20pt) and coarser than baseline
+/// noise / kerning drift, so column edges land in distinct buckets.
+const XY_COLUMN_BUCKET_PT: f32 = 5.0;
+/// Minimum lines stacked at the same left-edge cluster for the cluster to
+/// count as a column peak. A real column has many lines at one x (15+);
+/// indented paragraph-starts and footnote markers produce a handful (3–6).
+/// We set this above the typical "indented paragraph" count so those drop
+/// out and only true column-left edges remain.
+const XY_COLUMN_MIN_LINES_PER_PEAK: usize = 10;
+/// Minimum horizontal distance between two column peaks, as a fraction of
+/// `bbox.width`. Sub-paragraph indents and list nesting produce
+/// closely-spaced peaks; a real column gutter is much further out.
+const XY_COLUMN_MIN_GAP_FRACTION: f32 = 0.25;
+/// Minimum fraction of items that must start at one of the two detected
+/// column peaks. Real 2-column layouts cluster nearly every line at one of
+/// two left edges; tables, lists, and scattered prose don't.
+const XY_COLUMN_PEAK_DOMINANCE: f32 = 0.55;
+/// Minimum smaller/larger ratio between the two column peaks' line counts.
+/// Balanced 2-column layouts have ~equal line counts in each column; a
+/// 90/10 split is almost certainly a single column with one off-x bullet
+/// stack, not a real two-column structure.
+const XY_COLUMN_PEAK_BALANCE_RATIO: f32 = 0.4;
 
 #[derive(Debug)]
 struct CutCandidate {
@@ -3081,6 +3107,154 @@ const XY_BANNER_CLEARANCE_FACTOR: f32 = 1.5;
 /// Also helps mid-document section headings that span the full content width:
 /// a wide centered "5 Conclusion" line above a 2-column body would otherwise
 /// get pulled into one column.
+/// Fallback column-gutter detector for cases where the density-based V-cut
+/// search finds no valley — typically because a column-spanning element
+/// (wide heading, figure, table) fills the gutter at one y-band and inflates
+/// the projection at the gutter's x. Detects 2+ column structure by clustering
+/// the left edges of "narrow" lines (lines that don't span the full region
+/// width). When two clusters with ≥`XY_COLUMN_MIN_LINES_PER_PEAK` lines each
+/// are separated by ≥`XY_COLUMN_MIN_GAP_FRACTION × bbox.width`, returns a
+/// V-cut at the midpoint between them with a high score so it beats any
+/// density-based cut except banner.
+fn xy_find_column_cut(
+    items: &[ProjectedTextItem],
+    idxs: &[usize],
+    bbox: &Rect,
+    _median_h: f32,
+) -> Option<CutCandidate> {
+    if bbox.width <= 1.0 || idxs.len() < 8 {
+        return None;
+    }
+
+    // Histogram of individual item left edges. We deliberately avoid
+    // first-line-then-leftmost banding because items in the same y-band can
+    // belong to *different* columns (left-column and right-column items at
+    // the same baseline), and folding them into "one line's x_min" hides
+    // the right column entirely. Instead, every item contributes its own x
+    // to the histogram; a real column edge shows up as a tall spike (many
+    // line-starts at one x) while mid-line continuation fragments spread
+    // their contribution across many buckets and don't form spikes.
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    for &i in idxs {
+        let it = &items[i].item;
+        let x = it.x;
+        if x.is_finite() {
+            min_x = min_x.min(x);
+            max_x = max_x.max(x + it.width.max(0.0));
+        }
+    }
+    if !min_x.is_finite() || max_x <= min_x + 1.0 {
+        return None;
+    }
+    let total_w = max_x - min_x;
+    let bucket_pt = XY_COLUMN_BUCKET_PT;
+    let n_buckets = ((total_w / bucket_pt).ceil() as usize).max(1);
+    let mut hist = vec![0usize; n_buckets];
+    for &i in idxs {
+        let it = &items[i].item;
+        let b_f = ((it.x - min_x) / bucket_pt).floor();
+        let b = b_f.max(0.0) as usize;
+        if b < n_buckets {
+            hist[b] += 1;
+        }
+    }
+
+    // Cluster adjacent occupied buckets into peaks. A peak is a contiguous
+    // run of buckets with ≥1 count, merged through gaps of ≤2 zero buckets
+    // (~10pt) to absorb slight intra-column drift.
+    let mut peaks: Vec<(f32, usize)> = Vec::new(); // (x_center, item_count)
+    let mut i = 0;
+    while i < n_buckets {
+        if hist[i] == 0 {
+            i += 1;
+            continue;
+        }
+        let s = i;
+        let mut total = 0usize;
+        let mut last_nonzero = i;
+        let mut j = i;
+        while j < n_buckets {
+            if hist[j] > 0 {
+                total += hist[j];
+                last_nonzero = j;
+                j += 1;
+            } else if j - last_nonzero <= 2 {
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        let x_center = min_x + bucket_pt * (s as f32 + last_nonzero as f32 + 1.0) * 0.5;
+        peaks.push((x_center, total));
+        i = j;
+    }
+
+    // Keep only "strong" peaks. A real column edge is sat-stacked by many
+    // lines at the same left x; spurious peaks (a stray indented quote, a
+    // numbered marker, etc.) carry only a few lines.
+    peaks.retain(|(_, c)| *c >= XY_COLUMN_MIN_LINES_PER_PEAK);
+    if peaks.len() < 2 {
+        return None;
+    }
+    peaks.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+    // Tabular layouts produce 3+ strong peaks (one per cell column). Real
+    // page columns have exactly 2 dominant peaks (left edge of col 1, left
+    // edge of col 2) — even multi-paragraph indents are sub-peaks weak
+    // enough to drop out under the min_per_peak filter. Bail when we see
+    // more than 2 strong peaks so we don't slice tables.
+    if peaks.len() > 2 {
+        return None;
+    }
+    // Require the two peaks to together dominate the histogram — a real
+    // 2-column layout has the great majority of items starting at one of
+    // the two column-left edges. Tables, lists, and prose with scattered
+    // indents distribute their item-starts across many x's and won't pass.
+    let peak_sum: usize = peaks.iter().map(|(_, c)| *c).sum();
+    let total_items = idxs.len();
+    if (peak_sum as f32) / (total_items as f32) < XY_COLUMN_PEAK_DOMINANCE {
+        return None;
+    }
+    // Require the two peaks to be roughly balanced in size. A real 2-column
+    // layout has comparable line counts on each side; a long-single-column
+    // page that happens to have one bullet stack at a different x produces
+    // a tall + tiny peak pair that should not trigger a column split.
+    let (a, b) = (peaks[0].1, peaks[1].1);
+    let (smaller, larger) = (a.min(b) as f32, a.max(b) as f32);
+    if smaller / larger < XY_COLUMN_PEAK_BALANCE_RATIO {
+        return None;
+    }
+
+    // Find the widest gap between adjacent strong peaks. Must clear
+    // `XY_COLUMN_MIN_GAP_FRACTION × total_w` — list-item indents and
+    // block-quote indents produce closely spaced peaks; a real column
+    // gutter is much further apart.
+    let min_gap = total_w * XY_COLUMN_MIN_GAP_FRACTION;
+    let mut best: Option<(f32, usize)> = None;
+    for w_idx in 0..peaks.len() - 1 {
+        let gap = peaks[w_idx + 1].0 - peaks[w_idx].0;
+        if gap >= min_gap && best.is_none_or(|(g, _)| gap > g) {
+            best = Some((gap, w_idx));
+        }
+    }
+    let (_, li) = best?;
+    let cut_x = (peaks[li].0 + peaks[li + 1].0) * 0.5;
+    // Validate cut lands inside the bbox; if bbox-clamping moved the bbox
+    // off the items (some PDFs have content with negative x), fall back to
+    // an item-relative midpoint check.
+    if cut_x <= min_x + 1.0 || cut_x >= max_x - 1.0 {
+        return None;
+    }
+    // High finite score so this beats every density cut but stays below
+    // banner's infinity.
+    Some(CutCandidate {
+        axis: CutAxis::Vertical,
+        position: cut_x,
+        score: 1.0e9,
+    })
+}
+
 fn xy_find_banner_cut(
     items: &[ProjectedTextItem],
     idxs: &[usize],
@@ -3207,18 +3381,29 @@ fn xy_cut_rec(
     let banner = xy_find_banner_cut(items, &idxs, &bbox, median_h);
     let h = xy_find_best_cut(items, &idxs, &bbox, CutAxis::Horizontal, median_h, figures);
     let v = xy_find_best_cut(items, &idxs, &bbox, CutAxis::Vertical, median_h, figures);
-    let cut = match (banner, h, v) {
-        (Some(bc), _, _) => Some(bc),
-        (None, Some(hc), Some(vc)) => {
+    // Fallback column-start histogram. Only consulted when BOTH density
+    // cuts returned None — those are the cases (wide-heading filled gutter,
+    // figure-straddle layouts) where the column structure is real but the
+    // density projection can't see it. If either density cut found a
+    // valley, trust it instead of firing the histogram fallback.
+    let column = if v.is_none() && h.is_none() {
+        xy_find_column_cut(items, &idxs, &bbox, median_h)
+    } else {
+        None
+    };
+    let cut = match (banner, column, h, v) {
+        (Some(bc), _, _, _) => Some(bc),
+        (None, Some(cc), _, _) => Some(cc),
+        (None, None, Some(hc), Some(vc)) => {
             if vc.score > hc.score * XY_V_PREFERENCE_MARGIN {
                 Some(vc)
             } else {
                 Some(hc)
             }
         }
-        (None, Some(hc), None) => Some(hc),
-        (None, None, Some(vc)) => Some(vc),
-        (None, None, None) => None,
+        (None, None, Some(hc), None) => Some(hc),
+        (None, None, None, Some(vc)) => Some(vc),
+        (None, None, None, None) => None,
     };
     let Some(cut) = cut else {
         return Region {
@@ -3626,6 +3811,8 @@ mod tests {
             page_height: 792.0,
             graphics: Vec::new(),
             text_items: Vec::new(),
+            struct_nodes: Vec::new(),
+            image_refs: Vec::new(),
         };
         let projection_boxes = vec![
             projected_item("", 10.0, 0.0, 10.0),
@@ -3850,6 +4037,8 @@ mod tests {
             page_height: 792.0,
             text_items: Vec::new(),
             graphics: Vec::new(),
+            struct_nodes: Vec::new(),
+            image_refs: Vec::new(),
         }];
 
         let parsed = project_pages_to_grid(pages);

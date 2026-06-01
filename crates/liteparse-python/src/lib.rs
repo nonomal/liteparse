@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
-use liteparse::config::{LiteParseConfig, OutputFormat};
+use liteparse::config::{ImageMode, LiteParseConfig, OutputFormat};
 use liteparse::types::PdfInput;
 
 mod cli;
@@ -121,6 +121,8 @@ struct PyParseResult {
     pages: Vec<PyParsedPage>,
     #[pyo3(get)]
     text: String,
+    #[pyo3(get)]
+    images: Vec<PyExtractedImage>,
 }
 
 #[pymethods]
@@ -136,9 +138,10 @@ impl PyParseResult {
 
     fn __repr__(&self) -> String {
         format!(
-            "ParseResult(pages={}, text_len={})",
+            "ParseResult(pages={}, text_len={}, images={})",
             self.pages.len(),
-            self.text.len()
+            self.text.len(),
+            self.images.len()
         )
     }
 }
@@ -152,6 +155,52 @@ impl PyParseResult {
                 .map(PyParsedPage::from_rust)
                 .collect(),
             text: result.text,
+            images: result
+                .images
+                .into_iter()
+                .map(PyExtractedImage::from_rust)
+                .collect(),
+        }
+    }
+}
+
+#[pyclass(frozen, from_py_object)]
+#[derive(Clone)]
+struct PyExtractedImage {
+    #[pyo3(get)]
+    id: String,
+    #[pyo3(get)]
+    page: u32,
+    #[pyo3(get)]
+    format: String,
+    bytes_buffer: Vec<u8>,
+}
+
+#[pymethods]
+impl PyExtractedImage {
+    #[getter]
+    fn bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.bytes_buffer)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ExtractedImage(id='{}', page={}, format='{}', bytes_len={})",
+            self.id,
+            self.page,
+            self.format,
+            self.bytes_buffer.len()
+        )
+    }
+}
+
+impl PyExtractedImage {
+    fn from_rust(img: liteparse::types::ExtractedImage) -> Self {
+        Self {
+            id: img.id,
+            page: img.page,
+            format: img.format,
+            bytes_buffer: img.bytes,
         }
     }
 }
@@ -277,6 +326,7 @@ impl LiteParse {
         password = None,
         quiet = None,
         num_workers = None,
+        image_mode = None,
     ))]
     fn new(
         ocr_language: Option<String>,
@@ -291,6 +341,7 @@ impl LiteParse {
         password: Option<String>,
         quiet: Option<bool>,
         num_workers: Option<usize>,
+        image_mode: Option<String>,
     ) -> PyResult<Self> {
         let mut cfg = LiteParseConfig::default();
         if let Some(v) = ocr_language {
@@ -332,6 +383,13 @@ impl LiteParse {
         }
         if let Some(v) = num_workers {
             cfg.num_workers = v;
+        }
+        if let Some(v) = image_mode {
+            cfg.image_mode = match v.as_str() {
+                "off" | "none" => ImageMode::Off,
+                "embed" => ImageMode::Embed,
+                _ => ImageMode::Placeholder,
+            };
         }
 
         let inner = liteparse::parser::LiteParse::new(cfg.clone());
@@ -436,6 +494,7 @@ fn _liteparse(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<LiteParse>()?;
     m.add_class::<PyLiteParseConfig>()?;
     m.add_class::<PyParseResult>()?;
+    m.add_class::<PyExtractedImage>()?;
     m.add_class::<PyParsedPage>()?;
     m.add_class::<PyTextItem>()?;
     m.add_class::<PyScreenshotResult>()?;

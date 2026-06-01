@@ -66,6 +66,44 @@ pub struct Page {
     /// Not emitted in JSON/text outputs — consumed by the markdown layout pass.
     #[serde(skip)]
     pub graphics: Vec<GraphicPrimitive>,
+    /// Structure-tree nodes for this page when the PDF is tagged. Each node
+    /// carries its role, marked-content ids, and the union bbox of its tagged
+    /// content. Empty for untagged PDFs.
+    #[serde(skip)]
+    pub struct_nodes: Vec<StructNode>,
+    /// Raster image objects detected on the page. Empty when the page has no
+    /// images. Threaded through to `ParsedPage.image_refs`.
+    #[serde(skip)]
+    pub image_refs: Vec<ImageRef>,
+}
+
+/// One entry in the document outline (bookmarks). Coordinates are in PDF
+/// user space (origin bottom-left) — convert to viewport with
+/// `page_height - y` once you know the page.
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub struct OutlineTarget {
+    /// Hierarchy depth, 1-based.
+    pub level: u8,
+    pub title: String,
+    /// Zero-based page index of the destination.
+    pub page_index: i32,
+    /// Y in PDF user space, top of the target location. `None` when the
+    /// destination doesn't specify a Y.
+    pub y_pdf: Option<f32>,
+}
+
+/// One node from the structure tree of a page. Pre-flattened in pre-order
+/// (parent before children).
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub struct StructNode {
+    pub role: String,
+    pub mcids: Vec<i32>,
+    /// Union bbox of page objects tagged with `mcids`, in viewport coords.
+    /// `None` when none of the mcids resolved to a bbox.
+    pub bbox: Option<Rect>,
+    pub alt_text: Option<String>,
 }
 
 /// Represents a fully parsed page with projected text layout.
@@ -94,6 +132,45 @@ pub struct ParsedPage {
     /// obstacles, and reused downstream for figure classification.
     #[serde(skip)]
     pub figures: Vec<Rect>,
+    /// Structure-tree nodes for this page (tagged PDFs only). Pre-flattened in
+    /// pre-order. Consumed by the markdown classifier for highest-priority
+    /// heading / figure / table detection.
+    #[serde(skip)]
+    pub struct_nodes: Vec<StructNode>,
+    /// Raster image objects on the page. Bbox in viewport coords. Populated
+    /// during extraction; consumed by the markdown emitter to interleave
+    /// `Block::Figure` references at the right y position. Empty when the
+    /// page has no embedded images. Not part of JSON/text output.
+    #[serde(skip)]
+    pub image_refs: Vec<ImageRef>,
+}
+
+/// One embedded raster image on a page. `id` is a stable, page-scoped slug
+/// used as the markdown link target (e.g. `image_p1_0.png`). `obj_index` is
+/// the image's position among image page-objects, so a later embed pass can
+/// re-open the document and pull pixel bytes with `render_image_object`.
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub struct ImageRef {
+    pub id: String,
+    pub bbox: Rect,
+    pub obj_index: usize,
+}
+
+/// A raster image extracted from a page along with its pixel bytes. Surfaced
+/// on `ParseResult.images` only when `ImageMode::Embed` is configured —
+/// otherwise the extraction step skips the render and only `ImageRef`s are
+/// produced. `format` is currently always `"png"` (encoded from the
+/// FPDFImageObj_GetRenderedBitmap output via the same path used for page
+/// screenshots).
+#[derive(Debug, Clone, Serialize)]
+pub struct ExtractedImage {
+    pub id: String,
+    pub page: u32,
+    pub bbox: Rect,
+    pub format: String,
+    #[serde(skip)]
+    pub bytes: Vec<u8>,
 }
 
 #[doc(hidden)]
@@ -290,6 +367,8 @@ mod tests {
             page_height: 200.0,
             text_items: vec![sample_item()],
             graphics: vec![],
+            struct_nodes: vec![],
+            image_refs: vec![],
         };
         let s = serde_json::to_string(&p).unwrap();
         assert!(s.contains("\"page_number\":1"));

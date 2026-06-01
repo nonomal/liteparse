@@ -7,6 +7,7 @@ from liteparse._liteparse import LiteParse as _NativeLiteParse
 from liteparse._liteparse import search_items as _native_search_items
 
 from .types import (
+    ExtractedImage,
     LiteParseConfig,
     ParsedPage,
     ParseError,
@@ -42,9 +43,19 @@ def _convert_native_result(native_result: Any) -> ParseResult:
                 text_items=text_items,
             )
         )
+    images = [
+        ExtractedImage(
+            id=img.id,
+            page=img.page,
+            format=img.format,
+            bytes=img.bytes,
+        )
+        for img in getattr(native_result, "images", [])
+    ]
     return ParseResult(
         pages=pages,
         text=native_result.text,
+        images=images,
     )
 
 
@@ -76,6 +87,7 @@ class LiteParse:
         password: Optional[str] = None,
         quiet: Optional[bool] = None,
         num_workers: Optional[int] = None,
+        image_mode: Optional[str] = None,
     ):
         """
         Initialize LiteParse parser.
@@ -119,6 +131,8 @@ class LiteParse:
             kwargs["quiet"] = quiet
         if num_workers is not None:
             kwargs["num_workers"] = num_workers
+        if image_mode is not None:
+            kwargs["image_mode"] = image_mode
 
         self._native = _NativeLiteParse(**kwargs)
 

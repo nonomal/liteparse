@@ -230,6 +230,66 @@ pub struct PdfiumBindings {
     pub FPDFFont_GetGlyphWidth: unsafe extern "C" fn(FPDF_FONT, u32, f32, *mut f32) -> FPDF_BOOL,
     pub FPDFFont_GetGlyphWidthFromCharCode:
         unsafe extern "C" fn(FPDF_FONT, u32, f32, *mut f32) -> FPDF_BOOL,
+
+    // -- Outline (bookmarks) --
+    pub FPDFBookmark_GetFirstChild:
+        unsafe extern "C" fn(FPDF_DOCUMENT, FPDF_BOOKMARK) -> FPDF_BOOKMARK,
+    pub FPDFBookmark_GetNextSibling:
+        unsafe extern "C" fn(FPDF_DOCUMENT, FPDF_BOOKMARK) -> FPDF_BOOKMARK,
+    pub FPDFBookmark_GetTitle: unsafe extern "C" fn(
+        FPDF_BOOKMARK,
+        *mut std::os::raw::c_void,
+        std::os::raw::c_ulong,
+    ) -> std::os::raw::c_ulong,
+    pub FPDFBookmark_GetDest: unsafe extern "C" fn(FPDF_DOCUMENT, FPDF_BOOKMARK) -> FPDF_DEST,
+    pub FPDFBookmark_GetAction: unsafe extern "C" fn(FPDF_BOOKMARK) -> FPDF_ACTION,
+    pub FPDFAction_GetDest: unsafe extern "C" fn(FPDF_DOCUMENT, FPDF_ACTION) -> FPDF_DEST,
+    pub FPDFDest_GetDestPageIndex:
+        unsafe extern "C" fn(FPDF_DOCUMENT, FPDF_DEST) -> std::os::raw::c_int,
+    pub FPDFDest_GetLocationInPage: unsafe extern "C" fn(
+        FPDF_DEST,
+        *mut FPDF_BOOL,
+        *mut FPDF_BOOL,
+        *mut FPDF_BOOL,
+        *mut FS_FLOAT,
+        *mut FS_FLOAT,
+        *mut FS_FLOAT,
+    ) -> FPDF_BOOL,
+
+    // -- Structure tree --
+    pub FPDF_StructTree_GetForPage: unsafe extern "C" fn(FPDF_PAGE) -> FPDF_STRUCTTREE,
+    pub FPDF_StructTree_Close: unsafe extern "C" fn(FPDF_STRUCTTREE),
+    pub FPDF_StructTree_CountChildren:
+        unsafe extern "C" fn(FPDF_STRUCTTREE) -> std::os::raw::c_int,
+    pub FPDF_StructTree_GetChildAtIndex:
+        unsafe extern "C" fn(FPDF_STRUCTTREE, std::os::raw::c_int) -> FPDF_STRUCTELEMENT,
+    pub FPDF_StructElement_GetType: unsafe extern "C" fn(
+        FPDF_STRUCTELEMENT,
+        *mut std::os::raw::c_void,
+        std::os::raw::c_ulong,
+    ) -> std::os::raw::c_ulong,
+    pub FPDF_StructElement_GetAltText: unsafe extern "C" fn(
+        FPDF_STRUCTELEMENT,
+        *mut std::os::raw::c_void,
+        std::os::raw::c_ulong,
+    ) -> std::os::raw::c_ulong,
+    pub FPDF_StructElement_GetTitle: unsafe extern "C" fn(
+        FPDF_STRUCTELEMENT,
+        *mut std::os::raw::c_void,
+        std::os::raw::c_ulong,
+    ) -> std::os::raw::c_ulong,
+    pub FPDF_StructElement_CountChildren:
+        unsafe extern "C" fn(FPDF_STRUCTELEMENT) -> std::os::raw::c_int,
+    pub FPDF_StructElement_GetChildAtIndex:
+        unsafe extern "C" fn(FPDF_STRUCTELEMENT, std::os::raw::c_int) -> FPDF_STRUCTELEMENT,
+    pub FPDF_StructElement_GetChildMarkedContentID:
+        unsafe extern "C" fn(FPDF_STRUCTELEMENT, std::os::raw::c_int) -> std::os::raw::c_int,
+    pub FPDF_StructElement_GetMarkedContentID:
+        unsafe extern "C" fn(FPDF_STRUCTELEMENT) -> std::os::raw::c_int,
+    pub FPDF_StructElement_GetMarkedContentIdCount:
+        unsafe extern "C" fn(FPDF_STRUCTELEMENT) -> std::os::raw::c_int,
+    pub FPDF_StructElement_GetMarkedContentIdAtIndex:
+        unsafe extern "C" fn(FPDF_STRUCTELEMENT, std::os::raw::c_int) -> std::os::raw::c_int,
 }
 
 // SAFETY: PdfiumBindings contains only function pointers and a Library handle.
@@ -308,6 +368,42 @@ impl PdfiumBindings {
             FPDFFont_GetDescent: load_fn!(lib, "FPDFFont_GetDescent"),
             FPDFFont_GetGlyphWidth: load_fn!(lib, "FPDFFont_GetGlyphWidth"),
             FPDFFont_GetGlyphWidthFromCharCode: load_fn!(lib, "FPDFFont_GetGlyphWidthFromCharCode"),
+
+            FPDFBookmark_GetFirstChild: load_fn!(lib, "FPDFBookmark_GetFirstChild"),
+            FPDFBookmark_GetNextSibling: load_fn!(lib, "FPDFBookmark_GetNextSibling"),
+            FPDFBookmark_GetTitle: load_fn!(lib, "FPDFBookmark_GetTitle"),
+            FPDFBookmark_GetDest: load_fn!(lib, "FPDFBookmark_GetDest"),
+            FPDFBookmark_GetAction: load_fn!(lib, "FPDFBookmark_GetAction"),
+            FPDFAction_GetDest: load_fn!(lib, "FPDFAction_GetDest"),
+            FPDFDest_GetDestPageIndex: load_fn!(lib, "FPDFDest_GetDestPageIndex"),
+            FPDFDest_GetLocationInPage: load_fn!(lib, "FPDFDest_GetLocationInPage"),
+
+            FPDF_StructTree_GetForPage: load_fn!(lib, "FPDF_StructTree_GetForPage"),
+            FPDF_StructTree_Close: load_fn!(lib, "FPDF_StructTree_Close"),
+            FPDF_StructTree_CountChildren: load_fn!(lib, "FPDF_StructTree_CountChildren"),
+            FPDF_StructTree_GetChildAtIndex: load_fn!(lib, "FPDF_StructTree_GetChildAtIndex"),
+            FPDF_StructElement_GetType: load_fn!(lib, "FPDF_StructElement_GetType"),
+            FPDF_StructElement_GetAltText: load_fn!(lib, "FPDF_StructElement_GetAltText"),
+            FPDF_StructElement_GetTitle: load_fn!(lib, "FPDF_StructElement_GetTitle"),
+            FPDF_StructElement_CountChildren: load_fn!(lib, "FPDF_StructElement_CountChildren"),
+            FPDF_StructElement_GetChildAtIndex: load_fn!(lib, "FPDF_StructElement_GetChildAtIndex"),
+            FPDF_StructElement_GetChildMarkedContentID: load_fn!(
+                lib,
+                "FPDF_StructElement_GetChildMarkedContentID"
+            ),
+            FPDF_StructElement_GetMarkedContentID: load_fn!(
+                lib,
+                "FPDF_StructElement_GetMarkedContentID"
+            ),
+            FPDF_StructElement_GetMarkedContentIdCount: load_fn!(
+                lib,
+                "FPDF_StructElement_GetMarkedContentIdCount"
+            ),
+            FPDF_StructElement_GetMarkedContentIdAtIndex: load_fn!(
+                lib,
+                "FPDF_StructElement_GetMarkedContentIdAtIndex"
+            ),
+
             _lib: lib,
         })
     }

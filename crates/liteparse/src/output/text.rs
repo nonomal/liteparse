@@ -24,6 +24,8 @@ mod tests {
             regions: crate::types::Region::default(),
             graphics: vec![],
             figures: vec![],
+            struct_nodes: vec![],
+            image_refs: vec![],
         }
     }
 

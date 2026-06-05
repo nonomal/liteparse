@@ -276,6 +276,7 @@ fn extract_page_image_refs(page: &Page, page_number: u32) -> Vec<ImageRef> {
 ///     code-block fills / banner fills regardless of internal complexity);
 ///   - stroked paths → one `Stroke` per `LineTo` between consecutive points,
 ///     plus the implicit closing stroke when a subpath has its close flag set.
+///
 /// BezierTo segments don't emit strokes (we just advance the current point so
 /// later LineTos start from the right place).
 fn extract_page_graphics(page: &Page, view_box: &RectF) -> Vec<GraphicPrimitive> {

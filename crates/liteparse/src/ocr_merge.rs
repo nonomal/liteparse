@@ -481,6 +481,9 @@ mod tests {
             page_width: 100.0,
             page_height: 100.0,
             text_items: Vec::new(),
+            graphics: Vec::new(),
+            struct_nodes: Vec::new(),
+            image_refs: Vec::new(),
         }
     }
 
@@ -510,6 +513,9 @@ mod tests {
                 height: 50.0,
                 ..Default::default()
             }],
+            graphics: Vec::new(),
+            struct_nodes: Vec::new(),
+            image_refs: Vec::new(),
         }
     }
 
@@ -530,6 +536,9 @@ mod tests {
                 height: 5.0,
                 ..Default::default()
             }],
+            graphics: Vec::new(),
+            struct_nodes: Vec::new(),
+            image_refs: Vec::new(),
         }
     }
 

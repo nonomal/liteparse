@@ -37,27 +37,29 @@ pub(super) fn collapse_whitespace(s: &str) -> String {
     out
 }
 
-/// Append `next` to `accum` as the continuation of a paragraph. De-hyphenates
-/// when `accum` ends with `-` and `next` starts with an ASCII lowercase letter;
-/// otherwise joins with a single space.
-#[cfg(test)]
-pub(super) fn append_paragraph_line(accum: &mut String, next: &str) {
-    let next = collapse_whitespace(next);
-    if next.is_empty() {
+/// Append `to_append` onto `prev`, de-hyphenating across the boundary. When
+/// `prev` ends with `-` and `check` (the plain text of the continuation) starts
+/// with an ASCII lowercase letter, the trailing hyphen is dropped and the text
+/// concatenated directly (`co-` + `operate` → `cooperate`); otherwise the join
+/// is a single space.
+///
+/// `check` and `to_append` are separate so a caller tracking a styled `inline`
+/// representation can test the condition against the raw text while appending
+/// the inline-rendered chunk. Plain-text callers pass the same string twice.
+pub(super) fn dehyphenate_join(prev: &mut String, check: &str, to_append: &str) {
+    if check.is_empty() {
         return;
     }
-    if accum.is_empty() {
-        accum.push_str(&next);
+    if prev.is_empty() {
+        prev.push_str(to_append);
         return;
     }
-    let dehyphenate =
-        accum.ends_with('-') && next.chars().next().is_some_and(|c| c.is_ascii_lowercase());
-    if dehyphenate {
-        accum.pop(); // drop the '-'
-        accum.push_str(&next);
+    if prev.ends_with('-') && check.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
+        prev.pop();
+        prev.push_str(to_append);
     } else {
-        accum.push(' ');
-        accum.push_str(&next);
+        prev.push(' ');
+        prev.push_str(to_append);
     }
 }
 
@@ -164,30 +166,13 @@ pub(super) fn append_to_paragraph(accum: &mut ParaAccum, next_line: &ProjectedLi
         return;
     }
 
-    let dehyphenate = accum.raw.ends_with('-')
-        && next_raw
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_lowercase());
-    if dehyphenate {
-        accum.raw.pop();
-        accum.raw.push_str(&next_raw);
-        if accum.inline.ends_with('-') {
-            accum.inline.pop();
-            accum.inline.push_str(&next_inline);
-        } else {
-            // Hyphen sits inside an emphasis wrap — give up on stripping it
-            // from `inline` cleanly. Join with a space; raw is still correct
-            // for the uniform-paragraph case.
-            accum.inline.push(' ');
-            accum.inline.push_str(&next_inline);
-        }
-    } else {
-        accum.raw.push(' ');
-        accum.raw.push_str(&next_raw);
-        accum.inline.push(' ');
-        accum.inline.push_str(&next_inline);
-    }
+    // Raw side de-hyphenates against its own boundary. The inline side keys off
+    // the same raw lowercase test but checks *its own* trailing char: a hyphen
+    // tucked inside an emphasis wrap ends in `*`/`` ` `` rather than `-`, so it
+    // won't strip and falls through to a space join — exactly the prior
+    // behavior, now via one helper.
+    dehyphenate_join(&mut accum.raw, &next_raw, &next_raw);
+    dehyphenate_join(&mut accum.inline, &next_raw, &next_inline);
 
     // Maintain the running uniform-style flag.
     accum.uniform = match (accum.uniform, next_uniform) {
@@ -202,13 +187,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dehyphenation_only_for_lowercase_followups() {
+    fn dehyphenate_join_only_strips_before_lowercase() {
         let mut s = String::from("co-");
-        append_paragraph_line(&mut s, "operate");
+        dehyphenate_join(&mut s, "operate", "operate");
         assert_eq!(s, "cooperate");
 
         let mut s = String::from("Vitamin-");
-        append_paragraph_line(&mut s, "A");
+        dehyphenate_join(&mut s, "A", "A");
         assert_eq!(s, "Vitamin- A");
     }
 }

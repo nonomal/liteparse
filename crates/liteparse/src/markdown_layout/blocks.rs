@@ -2,8 +2,8 @@ use super::inline::escape_inline;
 use super::paragraphs::ParaAccum;
 use super::tables::escape_table_cell;
 
-/// Coarse block representation. Intentionally minimal — extended as later
-/// build-order steps land (tables, figures).
+/// Coarse block representation: the output of page classification, consumed by
+/// `render_blocks` to produce the final markdown string.
 #[derive(Debug, Clone)]
 pub enum Block {
     Heading {
@@ -51,7 +51,6 @@ pub enum Block {
         id: String,
         bbox: crate::types::Rect,
     },
-    Blank,
 }
 
 /// Resolve a `ParaAccum` to a `Block::Paragraph`. When the paragraph was
@@ -164,7 +163,7 @@ pub fn render_blocks(blocks: &[Block]) -> String {
                     // CommonMark/GFM requires a header row before the
                     // separator; synthesize a blank header so renderers that
                     // refuse header-less tables still display the body.
-                    out.push_str("|");
+                    out.push('|');
                     for _ in 0..column_count {
                         out.push_str("   |");
                     }
@@ -218,7 +217,6 @@ pub fn render_blocks(blocks: &[Block]) -> String {
                 out.push_str(id);
                 out.push_str(".png)");
             }
-            Block::Blank => {}
         }
     }
     out

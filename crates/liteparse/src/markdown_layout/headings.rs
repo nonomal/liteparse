@@ -165,7 +165,7 @@ pub(super) fn looks_like_toc_entry(text: &str) -> bool {
         tail_start -= 1;
     }
     let tail_len = n - tail_start;
-    if tail_len < 2 || tail_len > 6 {
+    if !(2..=6).contains(&tail_len) {
         return false;
     }
     let mut sep_end = tail_start;
@@ -279,18 +279,7 @@ pub(super) fn looks_like_bold_heading(
     // pick up (results tables, scoreboards, math display). A real section
     // heading is mostly letters: "1 Introduction" passes (~92% alpha across
     // non-whitespace chars), "47.5 14" doesn't (0%), "BLEU-1 25.87" doesn't.
-    let mut alpha = 0usize;
-    let mut total = 0usize;
-    for c in text.chars() {
-        if c.is_whitespace() {
-            continue;
-        }
-        total += 1;
-        if c.is_alphabetic() {
-            alpha += 1;
-        }
-    }
-    if total == 0 || (alpha as f32) / (total as f32) < 0.5 {
+    if alpha_ratio(text) < 0.5 {
         return false;
     }
     // Reject when the line itself looks tabular: ≥3 cells separated by font-size
@@ -322,24 +311,22 @@ pub(super) fn looks_like_bold_heading(
     if !gap_above_ok {
         return false;
     }
-    let gap_below_ok = match next {
+    match next {
         None => true,
         Some(n) => !continues_paragraph(line, n),
-    };
-    gap_below_ok
+    }
 }
 
 /// Returns true if `line` is a numbered section heading like "1. **Foo**" —
 /// `parse_list_marker` already matched the "N." / "N)" prefix; this checks
 /// that the body after the marker is uniformly bold body-size text and that
-/// the line stands alone (paragraph break above and below). When true the
-/// caller should emit a Heading at `heading_map.len()+1` rather than a
-/// ListItem. Mirrors `looks_like_bold_heading`'s gating modulo the marker.
+/// the line has a paragraph break above it. When true the caller should emit a
+/// Heading at `heading_map.len()+1` rather than a ListItem. Mirrors
+/// `looks_like_bold_heading`'s gating modulo the marker.
 pub(super) fn looks_like_numbered_bold_heading(
     line: &ProjectedLine,
     rest: &str,
     prev: Option<&ProjectedLine>,
-    _next: Option<&ProjectedLine>,
 ) -> bool {
     let rest_trim = rest.trim();
     if rest_trim.is_empty() || rest_trim.chars().count() > BOLD_HEADING_MAX_CHARS {
@@ -388,17 +375,7 @@ pub(super) fn looks_like_numbered_bold_heading(
     }
     // Mostly alphabetic — same intuition as `looks_like_bold_heading`'s
     // alpha-ratio filter: rejects tabular bold rows of digits.
-    let (mut alpha, mut total) = (0usize, 0usize);
-    for c in rest_trim.chars() {
-        if c.is_whitespace() {
-            continue;
-        }
-        total += 1;
-        if c.is_alphabetic() {
-            alpha += 1;
-        }
-    }
-    if total == 0 || (alpha as f32) / (total as f32) < 0.5 {
+    if alpha_ratio(rest_trim) < 0.5 {
         return false;
     }
     // Paragraph-break gap above. We deliberately don't require gap_below:
@@ -485,9 +462,10 @@ const MAX_HEADING_AVG_LINE_CHARS: f32 = 200.0;
 const MIN_HEADING_ALPHA_RATIO: f32 = 0.5;
 
 /// Build a heading-size → level map: sizes strictly larger than `body_size`,
-/// filtered to those with at least `MIN_HEADING_LINES` distinct occurrences
-/// (drops one-off equation/figure-label artifacts), sorted descending, mapped
-/// to levels 1..=MAX_HEADING_LEVELS.
+/// filtered by the quality guards `MIN_HEADING_TOTAL_CHARS`,
+/// `MIN_HEADING_AVG_LINE_CHARS`, `MAX_HEADING_AVG_LINE_CHARS`, and
+/// `MIN_HEADING_ALPHA_RATIO` (drop one-off equation / figure-label / legend
+/// artifacts), sorted descending, mapped to levels 1..=MAX_HEADING_LEVELS.
 pub fn build_heading_map(pages: &[ParsedPage], body_size: f32) -> Vec<(f32, u8)> {
     use std::collections::HashMap;
     // (size_key → (size, line_count, total_chars, alpha_chars))
@@ -540,8 +518,8 @@ pub fn build_heading_map(pages: &[ParsedPage], body_size: f32) -> Vec<(f32, u8)>
             };
             let avg_line_chars = *chars as f32 / (*lines).max(1) as f32;
             *chars >= MIN_HEADING_TOTAL_CHARS
-                && avg_line_chars >= MIN_HEADING_AVG_LINE_CHARS
-                && avg_line_chars <= MAX_HEADING_AVG_LINE_CHARS
+                && (MIN_HEADING_AVG_LINE_CHARS..=MAX_HEADING_AVG_LINE_CHARS)
+                    .contains(&avg_line_chars)
                 && alpha_ratio >= MIN_HEADING_ALPHA_RATIO
         })
         .map(|(s, _, _, _)| *s)
@@ -552,6 +530,28 @@ pub fn build_heading_map(pages: &[ParsedPage], body_size: f32) -> Vec<(f32, u8)>
         .enumerate()
         .map(|(i, s)| (s, (i + 1) as u8))
         .collect()
+}
+
+/// Fraction of non-whitespace characters in `text` that are alphabetic.
+/// Returns 0.0 for an empty/all-whitespace string. The heading heuristics use
+/// this to reject digit-dominated tabular rows ("47.5 14", "BLEU-1 25.87")
+/// that would otherwise be promoted to headings.
+fn alpha_ratio(text: &str) -> f32 {
+    let mut alpha = 0usize;
+    let mut total = 0usize;
+    for c in text.chars() {
+        if c.is_whitespace() {
+            continue;
+        }
+        total += 1;
+        if c.is_alphabetic() {
+            alpha += 1;
+        }
+    }
+    if total == 0 {
+        return 0.0;
+    }
+    alpha as f32 / total as f32
 }
 
 pub(super) fn heading_level_for(size: f32, heading_map: &[(f32, u8)]) -> Option<u8> {
@@ -753,7 +753,7 @@ mod tests {
 
     #[test]
     fn heading_map_descending_levels() {
-        // Heading text needs to clear `MIN_HEADING_TOTAL_CHARS` (25) so the
+        // Heading text needs to clear `MIN_HEADING_TOTAL_CHARS` (10) so the
         // size qualifies as a real heading rather than chart-legend noise.
         let pages = vec![page(vec![
             line("The largest heading on the page", 50.0, 50.0, 24.0, 24.0),

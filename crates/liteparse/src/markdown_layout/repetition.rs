@@ -108,12 +108,6 @@ const SP_BOTTOM_BAND_FRACTION: f32 = 0.15;
 /// and the rest of the page content. A real header/footer is visually
 /// separated; body lines that happen to sit near the top/bottom are not.
 const SP_ISOLATION_GAP_RATIO: f32 = 1.0;
-/// Font-size delta threshold: lines whose size differs from body by this
-/// fraction (smaller OR larger) are size-suspicious chrome candidates. The
-/// 0.15 floor admits typical 8/9pt chrome on 10pt body and 12+pt banner
-/// chrome on 10pt body without sweeping in sub-headings (which usually
-/// differ by ≥ 25%).
-const SP_FONT_DELTA: f32 = 0.15;
 
 /// Heuristic check: does the line text match a known running-chrome
 /// signature? URLs/DOIs, journal-article preamble ("Please cite this
@@ -202,13 +196,14 @@ fn has_year(lower: &str) -> bool {
         if !starts_word {
             continue;
         }
-        if (bytes[i] == b'1' && bytes[i + 1] == b'9') || (bytes[i] == b'2' && bytes[i + 1] == b'0')
+        if ((bytes[i] == b'1' && bytes[i + 1] == b'9')
+            || (bytes[i] == b'2' && bytes[i + 1] == b'0'))
+            && bytes[i + 2].is_ascii_digit()
+            && bytes[i + 3].is_ascii_digit()
         {
-            if bytes[i + 2].is_ascii_digit() && bytes[i + 3].is_ascii_digit() {
-                let ends_word = i + 4 >= bytes.len() || !bytes[i + 4].is_ascii_alphanumeric();
-                if ends_word {
-                    return true;
-                }
+            let ends_word = i + 4 >= bytes.len() || !bytes[i + 4].is_ascii_alphanumeric();
+            if ends_word {
+                return true;
             }
         }
     }
@@ -343,9 +338,6 @@ pub fn detect_single_page_chrome(
         if !matches_chrome_pattern(text) {
             continue;
         }
-        // SP_FONT_DELTA reserved for a future size-aware pass; keep the
-        // constant so the threshold stays documented.
-        let _ = SP_FONT_DELTA;
 
         // Length guard: avoid stripping long paragraphs that happen to sit in
         // the band and start with a URL — chrome lines are short. 200 char

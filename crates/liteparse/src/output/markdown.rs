@@ -7,10 +7,11 @@ use crate::types::{OutlineTarget, ParsedPage};
 
 /// Format parsed pages as markdown.
 ///
-/// Current coverage (build-order step 3): char-weighted font-size histogram →
-/// heading detection, paragraph grouping with de-hyphenation. Lines that don't
-/// classify as a heading are joined into paragraphs. Lists, code blocks,
-/// tables, and inline styling are still pending.
+/// Whole-document signals (body font size, heading-level map, repeating
+/// header/footer set) are computed once up front, then each page is classified
+/// into blocks ([`classify_page_with_filters`]) and rendered. Block classes
+/// cover headings, paragraphs (with de-hyphenation and inline emphasis), lists,
+/// code blocks, ruled and borderless tables, horizontal rules, and figures.
 ///
 /// Pages are emitted in order, separated by `\n\n-----\n\n` with a
 /// `<!-- page N -->` marker. Pages that contain no projected lines (e.g. blank

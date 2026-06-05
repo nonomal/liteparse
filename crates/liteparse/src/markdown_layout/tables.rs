@@ -164,9 +164,7 @@ pub(super) fn recover_merged_cell(
                 best_contained = contained;
             }
         }
-        let Some(i) = best_i else {
-            return None;
-        };
+        let i = best_i?;
         let cell = cells[i].clone();
         let chars: Vec<char> = cell.text.trim().chars().collect();
         let n = chars.len();
@@ -404,9 +402,7 @@ fn infer_tracks_from_raw_items(lines: &[ProjectedLine], start_idx: usize) -> Vec
     let mut current_count = 0usize;
     let mut current_anchor = f32::NEG_INFINITY;
     for &x in &xs {
-        if current_count == 0
-            || (x - current_anchor).abs() <= TABLE_TRACK_TOLERANCE_PT
-        {
+        if current_count == 0 || (x - current_anchor).abs() <= TABLE_TRACK_TOLERANCE_PT {
             current_sum += x;
             current_count += 1;
             current_anchor = current_sum / current_count as f32;
@@ -1269,15 +1265,14 @@ fn try_detect_description_list(lines: &[ProjectedLine], start_idx: usize) -> Opt
                 // Merged-span row: single cell starts at col 0 but extends past
                 // col 1's anchor. Split on the whitespace closest to col 1.
                 let straddles = c0_aligned && cell.end_x > col1_x + DESC_LIST_TRACK_TOL_PT;
-                if straddles {
-                    if let Some((left, right)) =
+                if straddles
+                    && let Some((left, right)) =
                         split_merged_at_anchor(&cell.text, cell.start_x, cell.end_x, col1_x)
-                        && is_label_like(&left)
-                    {
-                        rows.push((j, left, right));
-                        j += 1;
-                        continue;
-                    }
+                    && is_label_like(&left)
+                {
+                    rows.push((j, left, right));
+                    j += 1;
+                    continue;
                 }
                 break;
             }
@@ -1423,12 +1418,12 @@ fn merge_consecutive_table_runs(runs: Vec<TableRun>, lines: &[ProjectedLine]) ->
     }
     let mut out: Vec<TableRun> = Vec::with_capacity(runs.len());
     for run in runs {
-        if let Some(prev) = out.last() {
-            if let Some(merged) = try_merge_pair(prev, &run, lines) {
-                out.pop();
-                out.push(merged);
-                continue;
-            }
+        if let Some(prev) = out.last()
+            && let Some(merged) = try_merge_pair(prev, &run, lines)
+        {
+            out.pop();
+            out.push(merged);
+            continue;
         }
         out.push(run);
     }
@@ -1453,8 +1448,8 @@ fn run_column_count(run: &TableRun) -> Option<usize> {
 fn run_body_tracks(run: &TableRun, lines: &[ProjectedLine]) -> Option<Vec<(f32, f32)>> {
     let n_cols = run_column_count(run)?;
     let mut acc: Option<Vec<(f32, f32)>> = None;
-    for idx in run.start..run.end.min(lines.len()) {
-        let cells = split_cells(&lines[idx]);
+    for line in &lines[run.start..run.end.min(lines.len())] {
+        let cells = split_cells(line);
         if cells.len() != n_cols {
             continue;
         }
@@ -1523,9 +1518,9 @@ fn subset_mapping(a: &[(f32, f32)], b: &[(f32, f32)]) -> Option<Vec<usize>> {
         let mut mapping = Vec::with_capacity(a.len());
         let mut total = 0.0f32;
         let mut ok = true;
-        for i in 0..a.len() {
+        for (i, &ai) in a.iter().enumerate() {
             let bi = if i < skip { i } else { i + 1 };
-            match subset_match_score(a[i], b[bi], tol) {
+            match subset_match_score(ai, b[bi], tol) {
                 Some(d) => {
                     mapping.push(bi);
                     total += d;
@@ -1536,7 +1531,7 @@ fn subset_mapping(a: &[(f32, f32)], b: &[(f32, f32)]) -> Option<Vec<usize>> {
                 }
             }
         }
-        if ok && best.as_ref().map_or(true, |(_, e)| total < *e) {
+        if ok && best.as_ref().is_none_or(|(_, e)| total < *e) {
             best = Some((mapping, total));
         }
     }
@@ -1575,10 +1570,11 @@ fn is_absorbable_interstitial(line: &ProjectedLine) -> bool {
         return false;
     }
     // Reject sentence-shaped prose: ends in . ! ?  (a real label rarely does)
-    if let Some(last) = text.chars().last() {
-        if matches!(last, '.' | '!' | '?') && text.len() > 6 {
-            return false;
-        }
+    if let Some(last) = text.chars().last()
+        && matches!(last, '.' | '!' | '?')
+        && text.len() > 6
+    {
+        return false;
     }
     true
 }
@@ -1645,10 +1641,11 @@ fn try_merge_pair(a: &TableRun, b: &TableRun, lines: &[ProjectedLine]) -> Option
         }
         // If both runs had explicit headers, we kept A's; preserve B's
         // header text as a body row so its content isn't dropped.
-        if a_header.is_some() && b_header.is_some() {
-            if let Some(bh) = b_header.clone() {
-                rows.push(bh);
-            }
+        if a_header.is_some()
+            && b_header.is_some()
+            && let Some(bh) = b_header.clone()
+        {
+            rows.push(bh);
         }
         rows.extend(b_rows.iter().cloned());
         return Some(TableRun {
@@ -1939,8 +1936,8 @@ fn find_grid_components(hs: &[HSeg], vs: &[VSeg]) -> Vec<(Vec<usize>, Vec<usize>
 
     use std::collections::HashMap;
     let mut groups: HashMap<usize, (Vec<usize>, Vec<usize>)> = HashMap::new();
-    for i in 0..n_h {
-        if !connected[i] {
+    for (i, &is_connected) in connected[..n_h].iter().enumerate() {
+        if !is_connected {
             continue;
         }
         let r = uf_find(&mut parent, i);
@@ -1953,10 +1950,16 @@ fn find_grid_components(hs: &[HSeg], vs: &[VSeg]) -> Vec<(Vec<usize>, Vec<usize>
         let r = uf_find(&mut parent, n_h + j);
         groups.entry(r).or_default().1.push(j);
     }
-    groups
+    let mut comps: Vec<(Vec<usize>, Vec<usize>)> = groups
         .into_values()
         .filter(|(h_idx, v_idx)| h_idx.len() >= 2 && v_idx.len() >= 2)
-        .collect()
+        .collect();
+    // `HashMap::into_values` yields components in nondeterministic order, which
+    // leaks into table emission order and downstream overlap resolution. Sort
+    // by the topmost horizontal-segment index (h_idx is ascending by
+    // construction) so the output is stable run-to-run.
+    comps.sort_by_key(|(h_idx, _)| h_idx[0]);
+    comps
 }
 
 /// Build a `TableRun` for one ruled-grid component. Returns `None` if the

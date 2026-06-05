@@ -1,7 +1,7 @@
 use crate::projection::{is_bold_item, is_italic_item, is_mono_item};
 use crate::types::{ProjectedLine, TextItem};
 
-use super::paragraphs::collapse_whitespace;
+use super::paragraphs::{collapse_whitespace, dehyphenate_join};
 
 /// Lightweight bold detection on a raw `TextItem`. Delegates to
 /// `projection::is_bold_item` so per-span and per-line logic stay in sync.
@@ -123,11 +123,11 @@ pub(super) fn render_line_inline(line: &ProjectedLine) -> String {
             j += 1;
         }
         let mut group_text = String::new();
-        for k in i..j {
+        for span in &spans[i..j] {
             if !group_text.is_empty() && !group_text.ends_with(' ') {
                 group_text.push(' ');
             }
-            group_text.push_str(spans[k].text.trim());
+            group_text.push_str(span.text.trim());
         }
         let group_text = collapse_whitespace(&group_text);
         let escaped = escape_inline(&group_text);
@@ -196,25 +196,7 @@ pub(super) fn append_inline_continuation(
     next_inline: &str,
 ) {
     let next_raw = collapse_whitespace(next_raw);
-    if next_raw.is_empty() {
-        return;
-    }
-    if prev_text.is_empty() {
-        prev_text.push_str(next_inline);
-        return;
-    }
-    let dehyphenate = prev_text.ends_with('-')
-        && next_raw
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_lowercase());
-    if dehyphenate {
-        prev_text.pop();
-        prev_text.push_str(next_inline);
-    } else {
-        prev_text.push(' ');
-        prev_text.push_str(next_inline);
-    }
+    dehyphenate_join(prev_text, &next_raw, next_inline);
 }
 
 /// Returns the shared `SpanStyle` of `line` when every non-whitespace span on

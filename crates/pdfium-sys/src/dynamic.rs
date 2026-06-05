@@ -529,10 +529,10 @@ fn search_paths() -> Vec<PathBuf> {
     }
 
     // 4. Next to the current executable
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            paths.push(exe_dir.join(name));
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(exe_dir) = exe.parent()
+    {
+        paths.push(exe_dir.join(name));
     }
 
     // 5. Bare library name (system search paths / LD_LIBRARY_PATH / DYLD_LIBRARY_PATH / PATH)

@@ -14,6 +14,16 @@ use super::paragraphs::{ParaAccum, append_to_paragraph, collapse_whitespace, con
 use super::repetition::is_header_or_footer;
 use super::tables::{detect_ruled_tables, detect_tables, merge_table_runs};
 
+/// A document-order page interruption that breaks the normal text flow: either
+/// a horizontal rule (from vector graphics) or a figure injection (a raster
+/// image ref). Collected into one y-sorted stream so the two kinds interleave
+/// correctly by vertical position rather than emitting all of one before the
+/// other.
+enum Interruption {
+    Hr,
+    Figure(crate::types::ImageRef),
+}
+
 /// Returns true if any span on the line is rotated more than ~5° off
 /// horizontal — used to exclude sidebar / margin-stamp text (arXiv banners,
 /// watermarks, vertical legends) from the body-size and heading-size
@@ -67,15 +77,16 @@ pub fn classify_page_with_filters(
     // Index into `blocks` of the most recent ListItem in the current run — used
     // to merge wrapped continuation lines into the same item.
     let mut last_list_item_idx: Option<usize> = None;
-    // Most recent ProjectedLine appended to the active list item, for
-    // gap/font-size checks on continuation lines.
-    let mut last_list_line: Option<ProjectedLine> = None;
+    // Index (into `lines`) of the most recent line appended to the active list
+    // item, for gap/font-size checks on continuation lines. An index rather than
+    // a cloned line so the per-line hot loop doesn't deep-copy `spans` each time.
+    let mut last_list_line: Option<usize> = None;
     // (level, last line) of a heading block currently being accumulated. Lets a
     // multi-line wrapped heading/caption (e.g. a photo caption set one size
     // above body) merge into one Heading block instead of shredding into one
     // `###` per wrapped line. Adjacency is enforced by checking `blocks.last()`,
     // so this never reaches across an intervening block.
-    let mut heading_run: Option<(u8, ProjectedLine)> = None;
+    let mut heading_run: Option<(u8, usize)> = None;
 
     let flush_paragraph = |blocks: &mut Vec<Block>, p: Option<ParaAccum>| {
         if let Some(acc) = p
@@ -160,92 +171,61 @@ pub fn classify_page_with_filters(
 
     let mut table_iter = table_runs.into_iter().peekable();
 
-    // Pre-pass: detect horizontal rules from vector graphics so they can be
-    // emitted in document order between surrounding text lines.
-    let hr_ys: Vec<f32> = detect_horizontal_rules(page)
-        .into_iter()
-        .filter(|y| {
-            !table_y_extents
-                .iter()
-                .any(|(top, bot)| *y >= *top - 2.0 && *y <= *bot + 2.0)
-        })
-        .collect();
-    let mut hr_iter = hr_ys.into_iter().peekable();
-
-    // Figure injection: when image mode is on, walk the page's image refs in
-    // y-order and inject `Block::Figure` between text lines whose y has
-    // already passed. Suppressed inside table y-extents to keep cell-spanning
-    // raster cell backgrounds (rare but possible) from spawning a figure
-    // mid-table.
-    let figure_entries: Vec<(f32, crate::types::ImageRef)> =
-        if matches!(image_mode, crate::config::ImageMode::Off) {
-            Vec::new()
-        } else {
-            let mut v: Vec<(f32, crate::types::ImageRef)> = page
-                .image_refs
-                .iter()
-                .filter(|r| {
-                    !table_y_extents
-                        .iter()
-                        .any(|(top, bot)| r.bbox.y >= *top - 2.0 && r.bbox.y <= *bot + 2.0)
-                })
-                .map(|r| (r.bbox.y, r.clone()))
-                .collect();
-            v.sort_by(|a, b| a.0.total_cmp(&b.0));
-            v
-        };
-    let mut figure_iter = figure_entries.into_iter().peekable();
-
-    // Emit any HRs whose y is at or above `before_y`. Flushes the active
-    // paragraph/code/list state first so the rule lands as its own block.
-    let emit_hrs_before = |blocks: &mut Vec<Block>,
-                           paragraph: &mut Option<ParaAccum>,
-                           code: &mut Option<Vec<String>>,
-                           list_base: &mut Option<f32>,
-                           last_item: &mut Option<usize>,
-                           last_line: &mut Option<ProjectedLine>,
-                           hr_iter: &mut std::iter::Peekable<std::vec::IntoIter<f32>>,
-                           before_y: f32| {
-        while let Some(&hy) = hr_iter.peek() {
-            if hy > before_y {
-                break;
-            }
-            hr_iter.next();
-            flush_paragraph(blocks, paragraph.take());
-            flush_code(blocks, code.take());
-            *list_base = None;
-            *last_item = None;
-            *last_line = None;
-            blocks.push(Block::HorizontalRule);
-        }
+    // Pre-pass: collect document-order "interruptions" — horizontal rules
+    // (from vector graphics) and figure injections (raster image refs when
+    // image mode is on) — into one y-sorted stream. Emitting them from a single
+    // stream keeps HRs and figures correctly interleaved by y; a per-type pass
+    // would emit all HRs before all figures regardless of vertical position.
+    // Both are suppressed inside table y-extents so a row divider or a
+    // cell-spanning raster background doesn't spawn a block mid-table.
+    let in_table_band = |y: f32| {
+        table_y_extents
+            .iter()
+            .any(|(top, bot)| y >= *top - 2.0 && y <= *bot + 2.0)
     };
+    let mut interruptions: Vec<(f32, Interruption)> = detect_horizontal_rules(page)
+        .into_iter()
+        .filter(|y| !in_table_band(*y))
+        .map(|y| (y, Interruption::Hr))
+        .collect();
+    if !matches!(image_mode, crate::config::ImageMode::Off) {
+        for r in &page.image_refs {
+            if !in_table_band(r.bbox.y) {
+                interruptions.push((r.bbox.y, Interruption::Figure(r.clone())));
+            }
+        }
+    }
+    // Stable sort by y. HRs were pushed before figures, so an exact-y tie keeps
+    // the prior HR-before-figure ordering.
+    interruptions.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut interruptions = interruptions.into_iter().peekable();
 
-    // Mirror of `emit_hrs_before` for figure entries. Same flush semantics so
-    // a figure sitting between two paragraphs lands as its own block in the
-    // correct y order.
-    let emit_figures_before = |blocks: &mut Vec<Block>,
-                               paragraph: &mut Option<ParaAccum>,
-                               code: &mut Option<Vec<String>>,
-                               list_base: &mut Option<f32>,
-                               last_item: &mut Option<usize>,
-                               last_line: &mut Option<ProjectedLine>,
-                               figure_iter: &mut std::iter::Peekable<
-        std::vec::IntoIter<(f32, crate::types::ImageRef)>,
-    >,
-                               before_y: f32| {
-        while let Some((fy, _)) = figure_iter.peek() {
-            if *fy > before_y {
+    // Emit any interruptions whose y is at or above `before_y`, flushing the
+    // active paragraph/code/list state first so each lands as its own block.
+    let emit_before = |blocks: &mut Vec<Block>,
+                       paragraph: &mut Option<ParaAccum>,
+                       code: &mut Option<Vec<String>>,
+                       list_base: &mut Option<f32>,
+                       last_item: &mut Option<usize>,
+                       last_line: &mut Option<usize>,
+                       iter: &mut std::iter::Peekable<std::vec::IntoIter<(f32, Interruption)>>,
+                       before_y: f32| {
+        while let Some((y, _)) = iter.peek() {
+            if *y > before_y {
                 break;
             }
-            let (_, r) = figure_iter.next().unwrap();
+            let (_, kind) = iter.next().unwrap();
             flush_paragraph(blocks, paragraph.take());
             flush_code(blocks, code.take());
             *list_base = None;
             *last_item = None;
             *last_line = None;
-            blocks.push(Block::Figure {
-                id: r.id,
-                bbox: r.bbox,
+            blocks.push(match kind {
+                Interruption::Hr => Block::HorizontalRule,
+                Interruption::Figure(r) => Block::Figure {
+                    id: r.id,
+                    bbox: r.bbox,
+                },
             });
         }
     };
@@ -255,26 +235,16 @@ pub fn classify_page_with_filters(
         if let Some(run) = table_iter.peek()
             && run.start == idx
         {
-            // Flush any HRs above this table's top edge first.
+            // Flush any interruptions above this table's top edge first.
             let table_top = lines[run.start].bbox.y;
-            emit_hrs_before(
+            emit_before(
                 &mut blocks,
                 &mut paragraph,
                 &mut code,
                 &mut list_base_indent,
                 &mut last_list_item_idx,
                 &mut last_list_line,
-                &mut hr_iter,
-                table_top,
-            );
-            emit_figures_before(
-                &mut blocks,
-                &mut paragraph,
-                &mut code,
-                &mut list_base_indent,
-                &mut last_list_item_idx,
-                &mut last_list_line,
-                &mut figure_iter,
+                &mut interruptions,
                 table_top,
             );
             flush_paragraph(&mut blocks, paragraph.take());
@@ -287,26 +257,17 @@ pub fn classify_page_with_filters(
             idx = run.end;
             continue;
         }
-        let line = &lines[idx];
-        // Emit any HRs that fall above this line.
-        emit_hrs_before(
+        let line_idx = idx;
+        let line = &lines[line_idx];
+        // Emit any interruptions that fall above this line.
+        emit_before(
             &mut blocks,
             &mut paragraph,
             &mut code,
             &mut list_base_indent,
             &mut last_list_item_idx,
             &mut last_list_line,
-            &mut hr_iter,
-            line.bbox.y,
-        );
-        emit_figures_before(
-            &mut blocks,
-            &mut paragraph,
-            &mut code,
-            &mut list_base_indent,
-            &mut last_list_item_idx,
-            &mut last_list_line,
-            &mut figure_iter,
+            &mut interruptions,
             line.bbox.y,
         );
         idx += 1;
@@ -373,7 +334,7 @@ pub fn classify_page_with_filters(
             let prev = paragraph
                 .as_ref()
                 .map(|p| &p.last)
-                .or(last_list_line.as_ref());
+                .or(last_list_line.map(|i| &lines[i]));
             !(starts_lower && prev.is_some_and(|p| continues_paragraph(p, line)))
         });
         // A standalone "Contents" / "Table of Contents" / "Index" line is
@@ -392,9 +353,9 @@ pub fn classify_page_with_filters(
             // emitted block, and the line continues the paragraph. A real
             // section heading is followed by body text (which breaks the run),
             // so only a genuinely multi-line heading/caption merges here.
-            if let Some((run_level, run_line)) = heading_run.as_ref()
+            if let Some((run_level, run_idx)) = heading_run.as_ref()
                 && *run_level == level
-                && continues_paragraph(run_line, line)
+                && continues_paragraph(&lines[*run_idx], line)
                 && let Some(Block::Heading {
                     level: last_level,
                     text: htext,
@@ -402,7 +363,7 @@ pub fn classify_page_with_filters(
                 && *last_level == level
             {
                 append_inline_continuation(htext, text, &collapse_whitespace(text));
-                heading_run = Some((level, line.clone()));
+                heading_run = Some((level, line_idx));
                 continue;
             }
             flush_paragraph(&mut blocks, paragraph.take());
@@ -413,7 +374,7 @@ pub fn classify_page_with_filters(
                 level,
                 text: collapse_whitespace(text),
             });
-            heading_run = Some((level, line.clone()));
+            heading_run = Some((level, line_idx));
             continue;
         }
 
@@ -434,8 +395,7 @@ pub fn classify_page_with_filters(
                     paragraph
                         .as_ref()
                         .map(|p| &p.last)
-                        .or(last_list_line.as_ref()),
-                    lines.get(idx),
+                        .or(last_list_line.map(|i| &lines[i])),
                 )
             {
                 flush_paragraph(&mut blocks, paragraph.take());
@@ -455,7 +415,7 @@ pub fn classify_page_with_filters(
                 .round()
                 .max(0.0)) as u8;
             last_list_item_idx = Some(blocks.len());
-            last_list_line = Some(line.clone());
+            last_list_line = Some(line_idx);
             // Render the list-item text via the inline pipeline so per-span
             // emphasis surfaces. We strip the marker from `rest` (already
             // done by `parse_list_marker`), but emphasis lives on `line.spans`,
@@ -476,18 +436,18 @@ pub fn classify_page_with_filters(
         // Continuation of a list item: same gap/font rules as paragraphs.
         // Footnote-style continuations often left-flush below the marker's
         // hanging indent, so we don't require indent ≥ marker indent.
-        if let Some(idx) = last_list_item_idx
-            && let Some(prev_line) = last_list_line.as_ref()
-            && continues_paragraph(prev_line, line)
+        if let Some(item_idx) = last_list_item_idx
+            && let Some(prev_idx) = last_list_line
+            && continues_paragraph(&lines[prev_idx], line)
             && let Some(Block::ListItem {
                 text: prev_text, ..
-            }) = blocks.get_mut(idx)
+            }) = blocks.get_mut(item_idx)
         {
             // De-hyphenate against the prior rendered text, then append the
             // inline-styled continuation.
             let cont_inline = render_line_inline(line);
             append_inline_continuation(prev_text, text, &cont_inline);
-            last_list_line = Some(line.clone());
+            last_list_line = Some(line_idx);
             continue;
         }
 
@@ -499,7 +459,7 @@ pub fn classify_page_with_filters(
         let prev_for_gap = paragraph
             .as_ref()
             .map(|p| &p.last)
-            .or(last_list_line.as_ref());
+            .or(last_list_line.map(|i| &lines[i]));
         let next_for_gap = lines.get(idx);
         if !toc_suppress && looks_like_bold_heading(line, prev_for_gap, next_for_gap) {
             flush_paragraph(&mut blocks, paragraph.take());
@@ -541,25 +501,15 @@ pub fn classify_page_with_filters(
 
     flush_paragraph(&mut blocks, paragraph.take());
     flush_code(&mut blocks, code.take());
-    // Flush any trailing HRs / figures that sat below the last text line.
-    emit_hrs_before(
+    // Flush any trailing interruptions that sat below the last text line.
+    emit_before(
         &mut blocks,
         &mut paragraph,
         &mut code,
         &mut list_base_indent,
         &mut last_list_item_idx,
         &mut last_list_line,
-        &mut hr_iter,
-        f32::INFINITY,
-    );
-    emit_figures_before(
-        &mut blocks,
-        &mut paragraph,
-        &mut code,
-        &mut list_base_indent,
-        &mut last_list_item_idx,
-        &mut last_list_line,
-        &mut figure_iter,
+        &mut interruptions,
         f32::INFINITY,
     );
     blocks

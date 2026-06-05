@@ -2752,48 +2752,48 @@ fn name_contains_any(name: &str, hints: &[&str]) -> bool {
 }
 
 pub(crate) fn is_bold_item(item: &TextItem) -> bool {
-    if let Some(flags) = item.font_flags {
-        if flags & PDF_FONT_FLAG_FORCE_BOLD != 0 {
-            return true;
-        }
+    if let Some(flags) = item.font_flags
+        && flags & PDF_FONT_FLAG_FORCE_BOLD != 0
+    {
+        return true;
     }
-    if let Some(w) = item.font_weight {
-        if w >= 600 {
-            return true;
-        }
+    if let Some(w) = item.font_weight
+        && w >= 600
+    {
+        return true;
     }
-    if let Some(n) = &item.font_name {
-        if name_contains_any(n, BOLD_NAME_HINTS) {
-            return true;
-        }
+    if let Some(n) = &item.font_name
+        && name_contains_any(n, BOLD_NAME_HINTS)
+    {
+        return true;
     }
     false
 }
 
 pub(crate) fn is_italic_item(item: &TextItem) -> bool {
-    if let Some(flags) = item.font_flags {
-        if flags & PDF_FONT_FLAG_ITALIC != 0 {
-            return true;
-        }
+    if let Some(flags) = item.font_flags
+        && flags & PDF_FONT_FLAG_ITALIC != 0
+    {
+        return true;
     }
-    if let Some(n) = &item.font_name {
-        if name_contains_any(n, ITALIC_NAME_HINTS) {
-            return true;
-        }
+    if let Some(n) = &item.font_name
+        && name_contains_any(n, ITALIC_NAME_HINTS)
+    {
+        return true;
     }
     false
 }
 
 pub(crate) fn is_mono_item(item: &TextItem) -> bool {
-    if let Some(flags) = item.font_flags {
-        if flags & PDF_FONT_FLAG_FIXED_PITCH != 0 {
-            return true;
-        }
+    if let Some(flags) = item.font_flags
+        && flags & PDF_FONT_FLAG_FIXED_PITCH != 0
+    {
+        return true;
     }
-    if let Some(n) = &item.font_name {
-        if name_contains_any(n, MONO_NAME_HINTS) {
-            return true;
-        }
+    if let Some(n) = &item.font_name
+        && name_contains_any(n, MONO_NAME_HINTS)
+    {
+        return true;
     }
     false
 }
@@ -3070,14 +3070,14 @@ fn xy_find_best_cut(
                 // inter-cell gaps win on tables with sparsely-filled cells
                 // (docs 120/180/150). Hard-reject any cut line that passes
                 // strictly through an obstacle rect intersecting `bbox`.
-                if !cut_line_passes_through_obstacle(axis, position, bbox, figures) {
-                    if best.as_ref().is_none_or(|b| score > b.score) {
-                        best = Some(CutCandidate {
-                            axis,
-                            position,
-                            score,
-                        });
-                    }
+                if !cut_line_passes_through_obstacle(axis, position, bbox, figures)
+                    && best.as_ref().is_none_or(|b| score > b.score)
+                {
+                    best = Some(CutCandidate {
+                        axis,
+                        position,
+                        score,
+                    });
                 }
             }
         } else {
@@ -3368,7 +3368,7 @@ fn xy_find_banner_cut(
     if bbox.width <= 1.0 || idxs.len() < 2 {
         return None;
     }
-    let mut sorted: Vec<usize> = idxs.iter().copied().collect();
+    let mut sorted: Vec<usize> = idxs.to_vec();
     sorted.sort_by(|&a, &b| items[a].item.y.total_cmp(&items[b].item.y));
     let band_tol = (median_h * 0.5).max(2.0);
     let min_clearance = (median_h * XY_BANNER_CLEARANCE_FACTOR).max(8.0);
@@ -3702,7 +3702,7 @@ pub(crate) fn build_projected_lines(
         const Y_BAND_HEIGHT_CAP: f32 = 24.0;
         for idx in sorted {
             let y = items[idx].item.y;
-            let h = items[idx].item.height.max(1.0).min(Y_BAND_HEIGHT_CAP);
+            let h = items[idx].item.height.clamp(1.0, Y_BAND_HEIGHT_CAP);
             if current.is_empty() {
                 current.push(idx);
                 current_y = y;
@@ -3806,12 +3806,12 @@ fn build_one_line(
         let n = it.text.chars().count().max(1);
         total_chars += n;
 
-        if let Some(size) = it.font_size {
-            if size > 0.0 {
-                let key = (size * 100.0).round() as u32;
-                let e = size_weights.entry(key).or_insert((size, 0));
-                e.1 += n;
-            }
+        if let Some(size) = it.font_size
+            && size > 0.0
+        {
+            let key = (size * 100.0).round() as u32;
+            let e = size_weights.entry(key).or_insert((size, 0));
+            e.1 += n;
         }
         let h_key = (it.height.max(0.0) * 100.0).round() as u32;
         let e = height_weights.entry(h_key).or_insert((it.height, 0));
@@ -3844,10 +3844,16 @@ fn build_one_line(
         }
     }
 
+    // NOTE on tie-breaks: `max_by_key` over a HashMap returns the *last* max it
+    // iterates, and HashMap iteration order is randomized per process. Ties on
+    // char-weight would therefore pick a different winner every run, making the
+    // line's font size / name / anchor non-deterministic (and with them, heading
+    // and emphasis classification downstream). We break every tie on the bucket
+    // key so the result is stable across runs.
     let dominant_size_from_font = size_weights
-        .values()
-        .max_by_key(|(_, n)| *n)
-        .map(|(s, _)| *s)
+        .iter()
+        .max_by_key(|(k, (_, n))| (*n, **k))
+        .map(|(_, (s, _))| *s)
         .unwrap_or(0.0);
     // Fallback: when PDFium reports font_size ≤ 1.5 (size baked into the text
     // matrix), use char-weighted bbox height instead so heading detection has
@@ -3856,23 +3862,23 @@ fn build_one_line(
         (dominant_size_from_font, false)
     } else {
         let h = height_weights
-            .values()
-            .max_by_key(|(_, n)| *n)
-            .map(|(h, _)| *h)
+            .iter()
+            .max_by_key(|(k, (_, n))| (*n, **k))
+            .map(|(_, (h, _))| *h)
             .unwrap_or(0.0);
         (h, true)
     };
 
     let dominant_font_name = name_weights
-        .into_iter()
-        .max_by_key(|(_, n)| *n)
-        .map(|(n, _)| n);
+        .iter()
+        .max_by_key(|(name, n)| (**n, *name))
+        .map(|(name, _)| name.clone());
 
     let majority = |count: usize| total_chars > 0 && count * 2 > total_chars;
 
     let dominant_anchor_key = anchor_weights
         .iter()
-        .max_by_key(|(_, n)| **n)
+        .max_by_key(|(k, n)| (**n, **k))
         .map(|(k, _)| *k)
         .unwrap_or(0);
     let anchor = match dominant_anchor_key {
@@ -3989,6 +3995,11 @@ mod tests {
             is_margin_line_number: false,
             rotated: false,
             d: 0.0,
+            orig_x: x,
+            orig_y: y,
+            orig_width: w,
+            orig_height: h,
+            orig_rotation: 0.0,
         }
     }
 

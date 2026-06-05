@@ -1,9 +1,10 @@
 //! Block classification for the markdown emitter.
 //!
 //! Consumes `ProjectedLine` entries from each `ParsedPage` and groups them into
-//! a sequence of `Block`s: headings, paragraphs, and (for now) raw lines that
-//! don't fit a recognized shape. Tables, lists, and code blocks land in later
-//! build-order steps.
+//! a sequence of `Block`s: headings, paragraphs, list items, code blocks,
+//! tables (ruled and borderless), horizontal rules, and figures. Tabular
+//! regions that can't be classified confidently fall back to a fenced grid
+//! projection rather than a mangled pipe table.
 
 mod blocks;
 mod classify;

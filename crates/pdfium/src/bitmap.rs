@@ -1,20 +1,37 @@
+use std::marker::PhantomData;
+
 use crate::error::PdfiumError;
 use crate::ffi;
+use crate::library::Library;
 
-pub struct Bitmap {
+/// A BGRA pixel buffer owned by PDFium.
+///
+/// The `'lib` lifetime ties the bitmap to a held [`Library`] lock, so it
+/// cannot be created (or destroyed via `Drop`) outside the PDFium critical
+/// section.
+pub struct Bitmap<'lib> {
     handle: pdfium_sys::FPDF_BITMAP,
+    _lib: PhantomData<&'lib Library>,
 }
 
-impl Bitmap {
+impl<'lib> Bitmap<'lib> {
     /// Wrap an existing FPDF_BITMAP handle (takes ownership, will destroy on drop).
     ///
     /// # Safety
-    /// The handle must be a valid, non-null bitmap that the caller owns.
+    /// The handle must be a valid, non-null bitmap that the caller owns,
+    /// and the caller must hold a [`Library`] for at least `'lib`.
     pub unsafe fn from_handle(handle: pdfium_sys::FPDF_BITMAP) -> Self {
-        Bitmap { handle }
+        Bitmap {
+            handle,
+            _lib: PhantomData,
+        }
     }
 
     /// Create a new BGRA bitmap with the given dimensions.
+    ///
+    /// The caller must hold a [`Library`] for at least `'lib` — this is
+    /// usually inferred from the call site (e.g. returning a `Bitmap<'lib>`
+    /// from a method on `Page<'_, 'lib>`).
     pub fn new(width: i32, height: i32) -> Result<Self, PdfiumError> {
         let handle = unsafe {
             ffi!(FPDFBitmap_CreateEx(
@@ -28,7 +45,10 @@ impl Bitmap {
         if handle.is_null() {
             return Err(PdfiumError::OperationFailed);
         }
-        Ok(Bitmap { handle })
+        Ok(Bitmap {
+            handle,
+            _lib: PhantomData,
+        })
     }
 
     pub fn handle(&self) -> pdfium_sys::FPDF_BITMAP {
@@ -94,7 +114,7 @@ impl Bitmap {
     }
 }
 
-impl Drop for Bitmap {
+impl Drop for Bitmap<'_> {
     fn drop(&mut self) {
         unsafe { ffi!(FPDFBitmap_Destroy(self.handle)) };
     }

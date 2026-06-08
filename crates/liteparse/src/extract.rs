@@ -3,11 +3,16 @@ use crate::types::{Page as LitePage, PdfInput, TextItem};
 use pdfium::{Document, Font, FontType, Library, Page, RectF, TextPage};
 
 /// Open a PDF from path or bytes with an optional password.
-pub(crate) fn load_document_from_input(
+///
+/// The returned [`Document`] borrows from the provided [`Library`], which
+/// holds the process-global PDFium lock. The lock is released when the
+/// `Library` is dropped, so callers must keep `lib` alive for as long as any
+/// `Document` / `Page` / `TextPage` etc. derived from it is in use.
+pub(crate) fn load_document_from_input<'lib>(
+    lib: &'lib Library,
     input: &PdfInput,
     password: Option<&str>,
-) -> Result<Document, LiteParseError> {
-    let lib = Library::init();
+) -> Result<Document<'lib>, LiteParseError> {
     match input {
         PdfInput::Path(path) => Ok(lib.load_document(path, password)?),
         PdfInput::Bytes(data) => Ok(lib.load_document_from_bytes(data, password)?),
@@ -15,13 +20,19 @@ pub(crate) fn load_document_from_input(
 }
 
 /// Extract pages from a `PdfInput` (file path or bytes) with filtering.
+///
+/// This convenience entry point acquires the PDFium lock internally for the
+/// full extraction. Callers that already hold a [`Library`] (e.g. because
+/// they're also rendering bitmaps in the same critical section) should call
+/// [`extract_pages_from_document`] directly.
 pub fn extract_pages_from_input(
     input: &PdfInput,
     target_pages: Option<&[u32]>,
     max_pages: usize,
     password: Option<&str>,
 ) -> Result<Vec<LitePage>, LiteParseError> {
-    let document = load_document_from_input(input, password)?;
+    let lib = Library::init();
+    let document = load_document_from_input(&lib, input, password)?;
     extract_pages_from_document(&document, target_pages, max_pages)
 }
 

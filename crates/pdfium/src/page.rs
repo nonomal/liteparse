@@ -17,13 +17,18 @@ pub struct ImageBounds {
     pub height: f32,
 }
 
-pub struct Page<'doc> {
+/// A loaded page within a [`Document`].
+///
+/// The `'doc` lifetime ties the page to its owning document; `'lib` carries
+/// the PDFium-lock lifetime through, ensuring no PDFium calls can occur
+/// after the lock is released.
+pub struct Page<'doc, 'lib: 'doc> {
     pub(crate) handle: pdfium_sys::FPDF_PAGE,
     pub(crate) doc_handle: pdfium_sys::FPDF_DOCUMENT,
-    pub(crate) _doc: PhantomData<&'doc Document>,
+    pub(crate) _doc: PhantomData<&'doc Document<'lib>>,
 }
 
-impl Page<'_> {
+impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
     pub fn width(&self) -> f32 {
         unsafe { ffi!(FPDF_GetPageWidthF(self.handle)) }
     }
@@ -107,7 +112,7 @@ impl Page<'_> {
         }
     }
 
-    pub fn text(&self) -> Result<TextPage<'_>, PdfiumError> {
+    pub fn text(&self) -> Result<TextPage<'_, 'lib>, PdfiumError> {
         let handle = unsafe { ffi!(FPDFText_LoadPage(self.handle)) };
         if handle.is_null() {
             return Err(PdfiumError::OperationFailed);
@@ -119,12 +124,15 @@ impl Page<'_> {
     }
 
     /// Render the page to a BGRA bitmap at the given DPI.
-    pub fn render(&self, dpi: f32) -> Result<Bitmap, PdfiumError> {
+    pub fn render(&self, dpi: f32) -> Result<Bitmap<'lib>, PdfiumError> {
         let scale = dpi / 72.0;
         let width = (self.width() * scale).round() as i32;
         let height = (self.height() * scale).round() as i32;
 
-        let bitmap = Bitmap::new(width, height)?;
+        // SAFETY: this method is on `Page<'_, 'lib>`, whose existence proves
+        // the PDFium lock is held for `'lib`; the returned `Bitmap<'lib>` is
+        // tied to that same lock lifetime.
+        let bitmap = unsafe { Bitmap::new(width, height) }?;
 
         // Fill with white (ARGB: 0xFFFFFFFF)
         bitmap.fill_rect(0, 0, width, height, 0xFFFFFFFF);
@@ -209,7 +217,7 @@ impl Page<'_> {
 
     /// Get the rendered bitmap of a specific embedded image object by index.
     /// The index corresponds to the order from iterating page objects (image objects only).
-    pub fn render_image_object(&self, image_obj_index: usize) -> Result<Bitmap, PdfiumError> {
+    pub fn render_image_object(&self, image_obj_index: usize) -> Result<Bitmap<'lib>, PdfiumError> {
         let obj_count = unsafe { ffi!(FPDFPage_CountObjects(self.handle)) };
         let mut image_idx = 0usize;
 
@@ -281,7 +289,7 @@ impl ViewportTransform {
     }
 }
 
-impl Page<'_> {
+impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
     /// Build a `ViewportTransform` by probing 3 points through PDFium.
     /// This makes 3 FFI calls total, after which all transforms are pure math.
     pub fn viewport_transform(&self, view_box: &RectF) -> ViewportTransform {
@@ -300,7 +308,7 @@ impl Page<'_> {
     }
 }
 
-impl Drop for Page<'_> {
+impl Drop for Page<'_, '_> {
     fn drop(&mut self) {
         unsafe { ffi!(FPDF_ClosePage(self.handle)) };
     }

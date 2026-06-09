@@ -13,6 +13,7 @@ use crate::projection;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::render;
 use crate::types::{ParsedPage, PdfInput};
+use pdfium::Library;
 
 /// Result of parsing a document.
 pub struct ParseResult {
@@ -32,6 +33,20 @@ pub struct ScreenshotResult {
 }
 
 /// Main LiteParse orchestrator.
+///
+/// ### Thread safety
+///
+/// `LiteParse` is `Send + Sync` and safe to share across threads (e.g.
+/// behind an `Arc`, or used concurrently from a multi-threaded `tokio`
+/// runtime).
+///
+/// PDFium itself is **not** thread-safe, so all PDFium FFI work — document
+/// loading, page rendering, text extraction — is serialized through a
+/// process-global lock held by [`pdfium::Library`]. From a caller's
+/// perspective, this means concurrent `parse_*` / `screenshot*` calls are
+/// safe but their PDFium portions run sequentially. The OCR pass and grid
+/// projection (which dominate runtime for OCR-heavy documents) run outside
+/// the lock and remain fully concurrent.
 pub struct LiteParse {
     config: LiteParseConfig,
     /// Optional caller-provided OCR engine. When set, this overrides the
@@ -98,43 +113,52 @@ impl LiteParse {
             .map_err(|e| format!("invalid --target-pages: {}", e))?;
 
         // Extract text (and pre-render OCR pages in one PDF load when OCR is on).
+        //
+        // The PDFium lock is acquired for this entire critical section and
+        // released before any `.await` below — OCR (network / CPU) and grid
+        // projection (pure Rust) do not touch PDFium, so they can run
+        // concurrently with other `LiteParse` calls.
         let password = self.config.password.as_deref();
-        let (mut pages, ocr_rendered) = if self.config.ocr_enabled {
-            let document = extract::load_document_from_input(&validated_input, password)?;
-            let pages = extract::extract_pages_from_document(
-                &document,
-                target_pages.as_deref(),
-                self.config.max_pages,
-            )?;
-            let t_extract = web_time::Instant::now();
-            log(&format!(
-                "[liteparse] extract: {:.1}ms ({} pages)",
-                t_extract.duration_since(t0).as_secs_f64() * 1000.0,
-                pages.len()
-            ));
-            let rendered = ocr_merge::render_pages_for_ocr(&document, &pages, self.config.dpi)?;
-            log(&format!(
-                "[liteparse] ocr render: {:.1}ms ({} pages)",
-                web_time::Instant::now()
-                    .duration_since(t_extract)
-                    .as_secs_f64()
-                    * 1000.0,
-                rendered.len()
-            ));
-            (pages, rendered)
-        } else {
-            let pages = extract::extract_pages_from_input(
-                &validated_input,
-                target_pages.as_deref(),
-                self.config.max_pages,
-                password,
-            )?;
-            log(&format!(
-                "[liteparse] extract: {:.1}ms ({} pages)",
-                web_time::Instant::now().duration_since(t0).as_secs_f64() * 1000.0,
-                pages.len()
-            ));
-            (pages, Vec::new())
+        let (mut pages, ocr_rendered) = {
+            let lib = Library::init();
+            if self.config.ocr_enabled {
+                let document = extract::load_document_from_input(&lib, &validated_input, password)?;
+                let pages = extract::extract_pages_from_document(
+                    &document,
+                    target_pages.as_deref(),
+                    self.config.max_pages,
+                )?;
+                let t_extract = web_time::Instant::now();
+                log(&format!(
+                    "[liteparse] extract: {:.1}ms ({} pages)",
+                    t_extract.duration_since(t0).as_secs_f64() * 1000.0,
+                    pages.len()
+                ));
+                let rendered = ocr_merge::render_pages_for_ocr(&document, &pages, self.config.dpi)?;
+                log(&format!(
+                    "[liteparse] ocr render: {:.1}ms ({} pages)",
+                    web_time::Instant::now()
+                        .duration_since(t_extract)
+                        .as_secs_f64()
+                        * 1000.0,
+                    rendered.len()
+                ));
+                (pages, rendered)
+            } else {
+                let document = extract::load_document_from_input(&lib, &validated_input, password)?;
+                let pages = extract::extract_pages_from_document(
+                    &document,
+                    target_pages.as_deref(),
+                    self.config.max_pages,
+                )?;
+                log(&format!(
+                    "[liteparse] extract: {:.1}ms ({} pages)",
+                    web_time::Instant::now().duration_since(t0).as_secs_f64() * 1000.0,
+                    pages.len()
+                ));
+                (pages, Vec::new())
+            }
+            // `lib` is dropped here, releasing the PDFium lock.
         };
         let t1 = web_time::Instant::now();
 

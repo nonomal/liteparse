@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 use super::{OcrEngine, OcrOptions, OcrResult};
-use tesseract_rs::{TessPageIteratorLevel, TesseractAPI};
+use tesseract_rs::{TessPageIteratorLevel, TessPageSegMode, TesseractAPI};
 
 const TESSDATA_BASE_URL: &str = "https://github.com/tesseract-ocr/tessdata_best/raw/main";
 
@@ -70,6 +70,12 @@ impl OcrEngine for TesseractOcrEngine {
             ensure_traineddata(Path::new(&resolved_path), language).await?;
             api.init(&resolved_path, language)?;
 
+            // Match the tesseract CLI's default page segmentation mode (PSM_AUTO,
+            // i.e. 3). The C++ library's own default when SetPageSegMode is never
+            // called is PSM_SINGLE_BLOCK (6), which assumes the image is a single
+            // uniform block of text and performs poorly on full-page layouts.
+            api.set_page_seg_mode(TessPageSegMode::PSM_AUTO)?;
+
             // Set image from raw RGB bytes (3 bytes per pixel)
             let bytes_per_pixel = 3;
             let bytes_per_line = width as i32 * bytes_per_pixel;
@@ -80,6 +86,12 @@ impl OcrEngine for TesseractOcrEngine {
                 bytes_per_pixel,
                 bytes_per_line,
             )?;
+
+            // Tesseract can't infer DPI from a raw RGB buffer (there's no image
+            // header), so it falls back to a guess and warns. Tell it the actual
+            // render resolution so its internal point-size/threshold heuristics are
+            // correct. Must come after set_image, which resets the resolution.
+            api.set_source_resolution(options.dpi.round() as i32)?;
 
             api.recognize()?;
 

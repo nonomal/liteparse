@@ -140,6 +140,7 @@ mod tests {
         let e = HttpOcrEngine::new("http://127.0.0.1:1/ocr".into());
         let opts = OcrOptions {
             language: "eng".into(),
+            dpi: 150.0,
         };
         let r = e.recognize(&[0u8; 4], 1, 1, &opts).await;
         assert!(r.is_err());

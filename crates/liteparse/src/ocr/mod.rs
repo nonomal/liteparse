@@ -23,6 +23,10 @@ pub struct OcrResult {
 
 pub struct OcrOptions {
     pub language: String,
+    /// Resolution (pixels per inch) the page image was rendered at. OCR engines
+    /// that can't infer DPI from raw pixel buffers (e.g. Tesseract fed RGB bytes)
+    /// use this so their internal point-size estimates are correct.
+    pub dpi: f32,
 }
 
 /// On native targets, `OcrEngine` and its returned futures must be `Send` so
@@ -105,6 +109,7 @@ mod tests {
         assert_eq!(engine.name(), "dummy");
         let opts = OcrOptions {
             language: "eng".into(),
+            dpi: 150.0,
         };
         let r = engine.recognize(&[], 1, 1, &opts).await.unwrap();
         assert_eq!(r.len(), 1);

@@ -139,7 +139,7 @@ pub(crate) async fn ocr_and_merge_rendered(
             tokio::spawn(async move {
                 // Park the task (not an OS thread) until a permit is available.
                 let _permit = sem.acquire_owned().await.expect("semaphore closed");
-                let options = OcrOptions { language };
+                let options = OcrOptions { language, dpi };
                 // Offload the (possibly CPU-blocking, e.g. Tesseract) recognize
                 // onto a blocking thread. Because the permit is already held,
                 // at most `num_workers` blocking threads are in use at once,

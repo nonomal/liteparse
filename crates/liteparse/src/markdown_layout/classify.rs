@@ -577,6 +577,26 @@ fn classify_region(
         // Any non-mono line ends the current code block (if any).
         state.flush_code(&mut blocks);
 
+        // Decorative divider / flourish lines (`* * * *`, a lone em-dash).
+        // Handled before heading/paragraph classification so the ornament
+        // neither glues onto the next paragraph nor gets promoted to a heading.
+        if let Some(is_rule) = decorative_divider_kind(text) {
+            state.flush_paragraph(&mut blocks);
+            state.reset_list();
+            heading_run = None;
+            if is_rule {
+                blocks.push(Block::HorizontalRule);
+            }
+            if debug {
+                eprintln!(
+                    "[md decorative] {} '{}'",
+                    if is_rule { "rule" } else { "drop" },
+                    text.chars().take(40).collect::<String>(),
+                );
+            }
+            continue;
+        }
+
         // Priority chain: tagged-PDF struct tree → outline → font-size map.
         let tagged_level = struct_heading_level(line, &page.struct_nodes);
         // Caption lines ("Figure 7", "Table 3.") are routinely set in a
@@ -901,6 +921,43 @@ fn classify_region(
     // Flush any trailing interruptions that sat below the last text line.
     state.emit_before(&mut blocks, &mut interruptions, f32::INFINITY);
     blocks
+}
+
+/// Classify a line that is *purely decorative* — no alphanumeric content, made
+/// up only of divider symbols (`* * * *`, `———`, `____`). Returns:
+///   - `Some(true)`  → a section divider (≥3 symbols): emit a thematic break.
+///   - `Some(false)` → a lone 1–2 char flourish (a stray em-dash under a
+///                     title): drop it (too small to be a meaningful rule).
+///   - `None`        → not decorative; classify normally.
+///
+/// Without this, a `* * * *` divider line flows into the paragraph accumulator
+/// and glues the ornament onto the start of the following paragraph, and a lone
+/// decorative dash gets size-promoted to a `# -` heading.
+fn decorative_divider_kind(text: &str) -> Option<bool> {
+    let mut symbols = 0usize;
+    for c in text.chars() {
+        if c.is_whitespace() {
+            continue;
+        }
+        if c.is_alphanumeric() || !is_divider_symbol(c) {
+            return None;
+        }
+        symbols += 1;
+    }
+    if symbols == 0 {
+        return None;
+    }
+    Some(symbols >= 3)
+}
+
+/// Characters treated as decorative divider/ornament glyphs. Deliberately
+/// conservative — excludes `.`, `=`, `~`, `+`, `#` which carry meaning elsewhere
+/// (dot leaders, ellipses, setext-ish rules, headers).
+fn is_divider_symbol(c: char) -> bool {
+    matches!(
+        c,
+        '*' | '-' | '_' | '–' | '—' | '•' | '·' | '●' | '▪' | '■' | '◦' | '★' | '☆'
+    )
 }
 
 /// Best-effort language hint for a fenced code block, used as the fence

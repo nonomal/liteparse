@@ -220,6 +220,7 @@ fn has_digit_range(t: &str) -> bool {
             while j < chars.len() && chars[j].is_ascii_digit() {
                 j += 1;
             }
+            let g1_len = j - i;
             // Skip optional spaces.
             let mut k = j;
             while k < chars.len() && chars[k] == ' ' {
@@ -231,7 +232,25 @@ fn has_digit_range(t: &str) -> bool {
                     m += 1;
                 }
                 if m < chars.len() && chars[m].is_ascii_digit() {
-                    return true;
+                    let mut n = m + 1;
+                    while n < chars.len() && chars[n].is_ascii_digit() {
+                        n += 1;
+                    }
+                    let g2_len = n - m;
+                    // A `YYYY-MM` / `YYYY-MM-DD` date is not a page range. A real
+                    // citation page range never starts with a 4-digit calendar
+                    // year whose second component is a 1-2 digit month — that
+                    // pattern is an administrative date (e.g. a "MS-2024-07"
+                    // tracking number), so skip it and keep scanning for a
+                    // genuine range elsewhere on the line.
+                    let g1_is_year = g1_len == 4
+                        && ((chars[i] == '1' && chars[i + 1] == '9')
+                            || (chars[i] == '2' && chars[i + 1] == '0'));
+                    if !(g1_is_year && g2_len <= 2) {
+                        return true;
+                    }
+                    i = n;
+                    continue;
                 }
             }
             i = j;
@@ -445,6 +464,16 @@ mod tests {
         assert!(!matches_chrome_pattern("Introduction"));
         // Title with year but no range — should not be stripped as chrome.
         assert!(!matches_chrome_pattern("Acme Annual Report 2023"));
+        // Administrative key-value band with a YYYY-MM tracking date — the
+        // date must not be read as a journal page range.
+        assert!(!matches_chrome_pattern(
+            "SERFF Tracking #: FBLB-134215544 State Tracking #: Company Tracking #: MS-2024-07"
+        ));
+        // A genuine YYYY-MM / YYYY-MM-DD date is not a page range.
+        assert!(!has_digit_range("Filed 2024-07"));
+        assert!(!has_digit_range("Generated 2025-01-23"));
+        // A real page range still registers, even with a year on the line.
+        assert!(has_digit_range("Vol 24, 1-9, 2017"));
     }
 
     #[test]

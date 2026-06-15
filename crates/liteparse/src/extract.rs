@@ -1110,7 +1110,7 @@ impl GlyphDecoder {
             reverse_cmap,
             ..
         } = info;
-        cache
+        let resolved = cache
             .entry(char_code)
             .or_insert_with(|| {
                 let name = font.char_glyph_name(char_code);
@@ -1159,8 +1159,25 @@ impl GlyphDecoder {
                     );
                 }
                 resolved
-            })
-            .as_deref()
+            });
+        // Don't double-expand a ligature PDFium already split. With no
+        // /ToUnicode, PDFium derives per-char unicodes from the glyph names
+        // itself, expanding a single ligature glyph (e.g. the "fi" glyph at
+        // char_code 0x02) into separate 'f' and 'i' TextChar entries that all
+        // share that one char_code. Resolving the multi-char glyph name ("fi")
+        // once per entry would emit "fi"+"fi" → "fifind". When PDFium already
+        // gave a clean (non-suspicious) char that is part of the resolved
+        // string, it has done the expansion — keep its char. Suspicious-char
+        // recoveries (control-code ligatures, glyph soup) still expand.
+        if let Some(r) = resolved.as_deref()
+            && r.chars().count() > 1
+            && !cheap_suspicious
+            && let Some(u) = char::from_u32(unicode)
+            && r.contains(u)
+        {
+            return None;
+        }
+        resolved.as_deref()
     }
 }
 

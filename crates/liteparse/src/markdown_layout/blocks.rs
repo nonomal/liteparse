@@ -169,38 +169,34 @@ pub fn render_blocks(blocks: &[Block]) -> String {
                 out.push_str(&wrap_emphasis(text, *bold, *italic));
             }
             Block::Table { header, rows } => {
-                let column_count = header
-                    .as_ref()
-                    .map(|h| h.len())
-                    .or_else(|| rows.first().map(|r| r.len()))
-                    .unwrap_or(0);
+                // GFM requires a header row before the separator. When the
+                // detector found no header, promote the first body row instead
+                // of synthesizing a blank `|   |   |` header — a visible empty
+                // row reads as sloppy output and carries no information.
+                let (head, body): (Option<&[String]>, &[Vec<String>]) = match header {
+                    Some(h) => (Some(h.as_slice()), rows.as_slice()),
+                    None => match rows.split_first() {
+                        Some((first, rest)) => (Some(first.as_slice()), rest),
+                        None => (None, rows.as_slice()),
+                    },
+                };
+                let column_count = head.map(|h| h.len()).unwrap_or(0);
                 if column_count == 0 {
                     continue;
                 }
-                if let Some(h) = header {
-                    out.push_str("| ");
-                    for (i, cell) in h.iter().enumerate() {
-                        if i > 0 {
-                            out.push_str(" | ");
-                        }
-                        out.push_str(&escape_table_cell(cell));
+                out.push_str("| ");
+                for (i, cell) in head.unwrap().iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(" | ");
                     }
-                    out.push_str(" |\n");
-                } else {
-                    // CommonMark/GFM requires a header row before the
-                    // separator; synthesize a blank header so renderers that
-                    // refuse header-less tables still display the body.
-                    out.push('|');
-                    for _ in 0..column_count {
-                        out.push_str("   |");
-                    }
-                    out.push('\n');
+                    out.push_str(&escape_table_cell(cell));
                 }
+                out.push_str(" |\n");
                 out.push('|');
                 for _ in 0..column_count {
                     out.push_str("---|");
                 }
-                for row in rows {
+                for row in body {
                     out.push_str("\n| ");
                     for (i, cell) in row.iter().enumerate() {
                         if i > 0 {
@@ -380,15 +376,13 @@ mod tests {
     }
 
     #[test]
-    fn render_table_without_header_synthesizes_blank_header() {
+    fn render_table_without_header_promotes_first_row() {
         let blocks = vec![Block::Table {
             header: None,
-            rows: vec![vec!["1".into(), "2".into()]],
+            rows: vec![vec!["h1".into(), "h2".into()], vec!["1".into(), "2".into()]],
         }];
         let s = render_blocks(&blocks);
-        // GFM/CommonMark needs a header row before the separator; we emit a
-        // blank one so renderers don't choke.
-        assert!(s.contains("|---|---|"));
-        assert!(s.ends_with("| 1 | 2 |"));
+        // No blank `|   |   |` header: the first row becomes the header.
+        assert_eq!(s, "| h1 | h2 |\n|---|---|\n| 1 | 2 |");
     }
 }

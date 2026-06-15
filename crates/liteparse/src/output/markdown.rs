@@ -77,9 +77,27 @@ pub fn format_markdown(
         if !has_content {
             blocks.retain(|b| !matches!(b, crate::markdown_layout::Block::HorizontalRule));
         }
+        dedupe_rules(&mut blocks);
         out.push_str(&render_blocks(&blocks));
     }
     out
+}
+
+/// Collapse cosmetic horizontal-rule noise on a single page's block stream:
+/// drop leading/trailing rules (which would otherwise abut the `-----` page
+/// separator) and collapse runs of consecutive rules to one. Rules come from
+/// two sources — vector-graphics detection and decorative divider text — and
+/// doubling up reads as sloppy output to a human, while carrying no extra
+/// structure for an LLM.
+fn dedupe_rules(blocks: &mut Vec<crate::markdown_layout::Block>) {
+    use crate::markdown_layout::Block::HorizontalRule;
+    while matches!(blocks.first(), Some(HorizontalRule)) {
+        blocks.remove(0);
+    }
+    while matches!(blocks.last(), Some(HorizontalRule)) {
+        blocks.pop();
+    }
+    blocks.dedup_by(|a, b| matches!((a, b), (HorizontalRule, HorizontalRule)));
 }
 
 #[cfg(test)]
@@ -131,6 +149,31 @@ mod tests {
     #[test]
     fn test_empty() {
         assert_eq!(format_markdown(&[], &[], ImageMode::Placeholder), "");
+    }
+
+    #[test]
+    fn dedupe_rules_drops_edges_and_collapses_runs() {
+        use crate::markdown_layout::Block::{self, HorizontalRule, Paragraph};
+        let p = |t: &str| Paragraph {
+            text: t.into(),
+            bold: false,
+            italic: false,
+        };
+        let mut blocks = vec![
+            HorizontalRule,
+            p("a"),
+            HorizontalRule,
+            HorizontalRule,
+            p("b"),
+            HorizontalRule,
+        ];
+        dedupe_rules(&mut blocks);
+        let kinds: Vec<bool> = blocks
+            .iter()
+            .map(|b| matches!(b, Block::HorizontalRule))
+            .collect();
+        // Leading + trailing rules gone; the doubled interior run collapsed to one.
+        assert_eq!(kinds, vec![false, true, false]);
     }
 
     #[test]

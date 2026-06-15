@@ -4046,6 +4046,7 @@ fn xy_cut_rec(
         None
     };
     let debug_xy = std::env::var("LITEPARSE_DEBUG_XY").is_ok();
+    let disable_vcut_minlines = std::env::var("LITEPARSE_DISABLE_VCUT_MINLINES").is_ok();
     if debug_xy && depth == 0 && std::env::var("LITEPARSE_DEBUG_ITEMS").is_ok() {
         for &i in &idxs {
             let it = &items[i].item;
@@ -4371,6 +4372,29 @@ fn xy_cut_rec(
                     let pad = "  ".repeat(depth as usize);
                     eprintln!(
                         "[xy d={depth}]{pad}    -> min-lines fail (lc={lc} rc={rc}), try next"
+                    );
+                }
+                continue;
+            }
+        }
+        // Vertical (column) min-lines guard. A real column gutter is sustained
+        // across multiple stacked lines on both sides. A vertical cut that
+        // isolates a single-line "column" is a false gutter: in single-column
+        // justified prose, a short final line plus a wide inter-word gap in the
+        // full-width line above it align an empty vertical band that is not a
+        // column boundary. Without this, that band splits the physical line
+        // into two sibling regions and the markdown emitter renders them out of
+        // order (e.g. "…and its share repurchases are 100%" → the tail is
+        // sliced off into its own region). The initial true 2-column split has
+        // many lines per side, so this never blocks real columns.
+        if cut.axis == CutAxis::Vertical && !disable_vcut_minlines {
+            let lc = xy_distinct_lines(items, &left, median_h);
+            let rc = xy_distinct_lines(items, &right, median_h);
+            if lc < XY_MIN_LINES_PER_H_SIDE || rc < XY_MIN_LINES_PER_H_SIDE {
+                if debug_xy {
+                    let pad = "  ".repeat(depth as usize);
+                    eprintln!(
+                        "[xy d={depth}]{pad}    -> v-cut min-lines fail (lc={lc} rc={rc}), try next"
                     );
                 }
                 continue;

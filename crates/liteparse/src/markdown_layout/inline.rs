@@ -1,4 +1,4 @@
-use crate::projection::{is_bold_item, is_italic_item, is_mono_item};
+use crate::projection::{is_bold_item, is_italic_item, is_mono_item, is_strike_item};
 use crate::types::{ProjectedLine, TextItem};
 
 use super::paragraphs::{collapse_whitespace, dehyphenate_join};
@@ -9,6 +9,7 @@ pub(super) struct SpanStyle {
     pub(super) bold: bool,
     pub(super) italic: bool,
     pub(super) mono: bool,
+    pub(super) strike: bool,
 }
 
 impl SpanStyle {
@@ -17,11 +18,12 @@ impl SpanStyle {
             bold: is_bold_item(item),
             italic: is_italic_item(item),
             mono: is_mono_item(item),
+            strike: is_strike_item(item),
         }
     }
 
     pub(super) fn is_plain(self) -> bool {
-        !self.bold && !self.italic && !self.mono
+        !self.bold && !self.italic && !self.mono && !self.strike
     }
 }
 
@@ -57,19 +59,28 @@ fn apply_link(inner: &str, url: &str) -> String {
 /// inline code (`` `…` ``) doesn't compose with emphasis in CommonMark, so when
 /// a span is mono we drop the `**/*` wrap. Bold + italic → `***…***`.
 fn apply_style(inner: &str, style: SpanStyle) -> String {
-    if style.mono {
+    let styled = if style.mono {
         // Use backticks; if inner already contains backticks, switch to a
         // longer fence (pair of backticks plus a space buffer) per CommonMark.
         if inner.contains('`') {
-            return format!("`` {} ``", inner);
+            format!("`` {} ``", inner)
+        } else {
+            format!("`{}`", inner)
         }
-        return format!("`{}`", inner);
-    }
-    match (style.bold, style.italic) {
-        (true, true) => format!("***{}***", inner),
-        (true, false) => format!("**{}**", inner),
-        (false, true) => format!("*{}*", inner),
-        (false, false) => inner.to_string(),
+    } else {
+        match (style.bold, style.italic) {
+            (true, true) => format!("***{}***", inner),
+            (true, false) => format!("**{}**", inner),
+            (false, true) => format!("*{}*", inner),
+            (false, false) => inner.to_string(),
+        }
+    };
+    // Strikethrough (GFM `~~…~~`) wraps outermost so it composes with emphasis
+    // and inline code (`~~**foo**~~`, `~~`bar`~~`).
+    if style.strike {
+        format!("~~{}~~", styled)
+    } else {
+        styled
     }
 }
 
@@ -359,6 +370,32 @@ mod tests {
         l.spans[0].link = Some("https://example.com/a b".to_string());
         let out = render_line_inline(&l);
         assert_eq!(out, "[link](<https://example.com/a b>)");
+    }
+
+    #[test]
+    fn render_line_inline_strike_span() {
+        // A struck-through span mid-line → `~~word~~`, plain neighbors untouched.
+        let mut l = styled_line(
+            &[
+                ("keep this", 50.0, Some("Arial")),
+                ("removed", 150.0, Some("Arial")),
+            ],
+            100.0,
+            10.0,
+        );
+        l.spans[1].strike = true;
+        let out = render_line_inline(&l);
+        assert!(out.contains("keep this"), "got: {out}");
+        assert!(out.contains("~~removed~~"), "got: {out}");
+    }
+
+    #[test]
+    fn render_line_inline_strike_composes_with_bold() {
+        // Strike wraps outside emphasis: `~~**word**~~`.
+        let mut l = styled_line(&[("gone", 50.0, Some("Arial-Bold"))], 100.0, 10.0);
+        l.spans[0].strike = true;
+        let out = render_line_inline(&l);
+        assert_eq!(out, "~~**gone**~~");
     }
 
     #[test]

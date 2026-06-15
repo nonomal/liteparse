@@ -62,6 +62,11 @@ pub struct TextItem {
     /// rectangle. Populated in `extract.rs`; consumed by the markdown emitter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
+    /// Whether a thin horizontal stroke/rect crosses this item's vertical middle
+    /// band (a strikethrough line). Populated in `extract.rs`; consumed by the
+    /// markdown emitter to wrap the text in `~~…~~`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub strike: bool,
 }
 
 #[doc(hidden)]

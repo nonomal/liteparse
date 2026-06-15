@@ -249,7 +249,9 @@ pub(super) fn append_to_paragraph(accum: &mut ParaAccum, next_line: &ProjectedLi
         return;
     }
     let next_inline = render_line_inline(next_line);
-    let next_uniform: Option<SpanStyle> = line_uniform_style(next_line);
+    // A struck line has no block-level flag, so it can't use the uniform
+    // raw-text fast path — drop it to `None` to force the `inline` rendering.
+    let next_uniform: Option<SpanStyle> = line_uniform_style(next_line).filter(|s| !s.strike);
 
     if accum.raw.is_empty() {
         accum.raw.push_str(&next_raw);

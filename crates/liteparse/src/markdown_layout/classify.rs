@@ -905,7 +905,12 @@ fn classify_region(
                 state.reset_list();
                 let inline = render_line_inline(line);
                 let raw = collapse_whitespace(text);
-                let uniform = line_uniform_style(line).map(|s| (s.bold, s.italic));
+                // Strike has no block-level Paragraph flag, so a struck line
+                // must keep the per-line `inline` rendering (which emits `~~…~~`)
+                // rather than take the uniform raw-text fast path.
+                let uniform = line_uniform_style(line)
+                    .filter(|s| !s.strike)
+                    .map(|s| (s.bold, s.italic));
                 state.paragraph = Some(ParaAccum {
                     raw,
                     inline,

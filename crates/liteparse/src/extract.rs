@@ -94,6 +94,7 @@ pub(crate) fn extract_pages_and_images(
             assign_links(&mut text_items, &page.links(&view_box));
         }
         let graphics = extract_page_graphics(&page, &view_box);
+        assign_strikethrough(&mut text_items, &graphics);
         let struct_nodes = extract_page_struct_nodes(&page, &view_box);
         let image_refs = extract_page_image_refs(&page, page_number);
 
@@ -154,6 +155,70 @@ fn assign_links(items: &mut [TextItem], links: &[PdfLink]) {
         for &i in &covered {
             if items[i].link.is_none() {
                 items[i].link = Some(link.uri.clone());
+            }
+        }
+    }
+}
+
+/// Max thickness (pt) for a stroke/rect to count as a strikethrough line.
+const STRIKE_MAX_THICKNESS_PT: f32 = 2.0;
+/// A strike line must horizontally cover at least this fraction of the item.
+const STRIKE_MIN_COVER_FRACTION: f32 = 0.6;
+
+/// Mark text items whose vertical *middle* band is crossed by a thin horizontal
+/// line (a strikethrough). The line may be drawn as a `Stroke` or as a thin
+/// filled `Rect`. Underlines (near the baseline) and overlines (near the top)
+/// are excluded by the band check; table rules / HRs almost never pass through
+/// the middle of a glyph run, and the per-item width-coverage gate keeps long
+/// dividers from tagging incidental text they happen to cross.
+fn assign_strikethrough(items: &mut [TextItem], graphics: &[GraphicPrimitive]) {
+    // Reduce graphics to horizontal segments: (xmin, xmax, y_center).
+    let mut segs: Vec<(f32, f32, f32)> = Vec::new();
+    for g in graphics {
+        match g {
+            GraphicPrimitive::Stroke {
+                x1,
+                y1,
+                x2,
+                y2,
+                width,
+                ..
+            } => {
+                let dy = (y1 - y2).abs();
+                let dx = (x1 - x2).abs();
+                if dy <= STRIKE_MAX_THICKNESS_PT && *width <= STRIKE_MAX_THICKNESS_PT && dx > dy {
+                    segs.push((x1.min(*x2), x1.max(*x2), (y1 + y2) * 0.5));
+                }
+            }
+            GraphicPrimitive::Rect { bbox, .. } => {
+                // A thin, wide filled rect acts as a line.
+                if bbox.height <= STRIKE_MAX_THICKNESS_PT && bbox.width > bbox.height {
+                    segs.push((bbox.x, bbox.x + bbox.width, bbox.y + bbox.height * 0.5));
+                }
+            }
+        }
+    }
+    if segs.is_empty() {
+        return;
+    }
+
+    for item in items.iter_mut() {
+        if item.width <= 0.0 || item.height <= 0.0 || item.text.trim().is_empty() {
+            continue;
+        }
+        // Viewport space is top-left origin, so `y` is the top edge. The middle
+        // band sits below the top and above the baseline, excluding over/underlines.
+        let band_top = item.y + item.height * 0.20;
+        let band_bot = item.y + item.height * 0.65;
+        let (ix0, ix1) = (item.x, item.x + item.width);
+        for &(sx0, sx1, sy) in &segs {
+            if sy < band_top || sy > band_bot {
+                continue;
+            }
+            let overlap = (ix1.min(sx1) - ix0.max(sx0)).max(0.0);
+            if overlap >= item.width * STRIKE_MIN_COVER_FRACTION {
+                item.strike = true;
+                break;
             }
         }
     }
@@ -1538,6 +1603,7 @@ impl SegmentBuilder {
                 stroke_color: self.stroke_color.clone(),
                 confidence: None,
                 link: None,
+                strike: false,
             });
         }
 
@@ -1549,6 +1615,52 @@ impl SegmentBuilder {
 mod tests {
     use super::*;
     use std::f32::consts::PI;
+
+    fn strike_item() -> TextItem {
+        TextItem {
+            text: "word".to_string(),
+            x: 100.0,
+            y: 100.0,
+            width: 40.0,
+            height: 10.0,
+            ..Default::default()
+        }
+    }
+
+    fn h_stroke(x1: f32, x2: f32, y: f32) -> GraphicPrimitive {
+        GraphicPrimitive::Stroke {
+            x1,
+            y1: y,
+            x2,
+            y2: y,
+            color: None,
+            width: 0.5,
+        }
+    }
+
+    #[test]
+    fn strike_midline_stroke_detected() {
+        let mut items = [strike_item()];
+        // Line through the vertical middle (y≈105) spanning the item width.
+        assign_strikethrough(&mut items, &[h_stroke(100.0, 140.0, 105.0)]);
+        assert!(items[0].strike);
+    }
+
+    #[test]
+    fn strike_underline_not_detected() {
+        let mut items = [strike_item()];
+        // Line near the baseline (bottom, y≈110) is an underline, not a strike.
+        assign_strikethrough(&mut items, &[h_stroke(100.0, 140.0, 110.0)]);
+        assert!(!items[0].strike);
+    }
+
+    #[test]
+    fn strike_short_line_not_detected() {
+        let mut items = [strike_item()];
+        // Mid-band but only covers ~25% of the item width.
+        assign_strikethrough(&mut items, &[h_stroke(100.0, 110.0, 105.0)]);
+        assert!(!items[0].strike);
+    }
 
     fn ti(text: &str, x: f32, y: f32, w: f32, h: f32) -> TextItem {
         TextItem {

@@ -2951,6 +2951,10 @@ pub(crate) fn is_italic_item(item: &TextItem) -> bool {
     false
 }
 
+pub(crate) fn is_strike_item(item: &TextItem) -> bool {
+    item.strike
+}
+
 pub(crate) fn is_mono_item(item: &TextItem) -> bool {
     if let Some(flags) = item.font_flags
         && flags & PDF_FONT_FLAG_FIXED_PITCH != 0

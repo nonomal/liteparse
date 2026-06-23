@@ -517,11 +517,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let complex_pages = is_complex.iter().filter(|c| c.needs_ocr).count();
 
-            if cmd.json {
+            if cmd.json && !cmd.quiet {
                 let json = serde_json::to_string(&is_complex)?;
                 println!("{}", json);
-            } else {
-                let verdict = if complex_pages > 0 { "COMPLEX" } else { "SIMPLE" };
+            } else if !cmd.quiet {
+                let verdict = if complex_pages > 0 {
+                    "COMPLEX"
+                } else {
+                    "SIMPLE"
+                };
                 println!(
                     "{} — {}/{} page(s) need OCR",
                     verdict,
@@ -542,7 +546,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         c.page_number,
                         c.text_length,
                         c.text_coverage,
-                        if c.has_substantial_images { "yes" } else { "no" },
+                        if c.has_substantial_images {
+                            "yes"
+                        } else {
+                            "no"
+                        },
                         if c.is_garbled { "yes" } else { "no" },
                         vector,
                         if c.needs_ocr { "yes" } else { "no" },
@@ -551,7 +559,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             // Exit non-zero when any page needs OCR, so the command is usable as
-            // a shell predicate (e.g. `is-complex doc.pdf && parse --disable-ocr`).
+            // a shell predicate: exit 0 (simple) → `&& parse --no-ocr` is safe.
             if complex_pages > 0 {
                 std::process::exit(1);
             }

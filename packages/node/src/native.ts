@@ -102,9 +102,24 @@ export interface NativeScreenshotResult {
   imageBuffer: Buffer;
 }
 
+export interface NativePageComplexityStats {
+  pageNumber: number;
+  textLength: number;
+  textCoverage: number;
+  hasSubstantialImages: boolean;
+  imageBlockCount: number;
+  imageCoverage: number;
+  largestImageCoverage: number;
+  uncoveredVectorArea?: number;
+  isGarbled: boolean;
+  pageArea: number;
+  needsOcr: boolean;
+}
+
 export interface LiteParseNative {
   parse(input: string | Buffer): Promise<NativeParseResult>;
   parsePages(pages: NativePageInput[]): NativeParseResult;
+  isComplex(input: string | Buffer): Promise<NativePageComplexityStats[]>;
   screenshot(
     input: string | Buffer,
     pageNumbers?: number[] | null,

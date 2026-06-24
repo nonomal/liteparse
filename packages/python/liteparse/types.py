@@ -72,6 +72,22 @@ class ScreenshotResult:
 
 
 @dataclass
+class PageComplexityStats:
+    """Per-page complexity signals used to decide whether a document needs OCR."""
+    page_number: int
+    text_length: int
+    text_coverage: float
+    has_substantial_images: bool
+    image_block_count: int
+    image_coverage: float
+    largest_image_coverage: float
+    uncovered_vector_area: Optional[float]
+    is_garbled: bool
+    page_area: float
+    needs_ocr: bool
+
+
+@dataclass
 class LiteParseConfig:
     """Resolved parser configuration."""
     ocr_language: str

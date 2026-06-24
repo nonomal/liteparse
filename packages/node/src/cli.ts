@@ -142,6 +142,76 @@ program
   });
 
 program
+  .command("is-complex")
+  .description(
+    "Check if a document is 'complex' enough to require OCR or other advanced parsing",
+  )
+  .argument("<file>", "Path to the document file")
+  .option("--json", "Output the result as JSON")
+  .option("--max-pages <n>", "Max pages to parse", parseInt)
+  .option(
+    "--target-pages <pages>",
+    'Pages to check (e.g., "1-5,10,15-20")',
+  )
+  .option("--password <password>", "Password for encrypted documents")
+  .option("-q, --quiet", "Suppress progress output")
+  .action(async (file: string, opts: Record<string, unknown>) => {
+    try {
+      const config: Partial<LiteParseConfig> = {};
+      if (opts.maxPages) config.maxPages = opts.maxPages as number;
+      if (opts.targetPages) config.targetPages = opts.targetPages as string;
+      if (opts.password) config.password = opts.password as string;
+      if (opts.quiet) config.quiet = true;
+
+      const parser = new LiteParse(config);
+      const stats = await parser.isComplex(file);
+
+      const complexPages = stats.filter((s) => s.needsOcr).length;
+
+      if (opts.json) {
+        process.stdout.write(JSON.stringify(stats));
+        process.stdout.write("\n");
+      } else {
+        const verdict = complexPages > 0 ? "COMPLEX" : "SIMPLE";
+        console.log(
+          `${verdict} — ${complexPages}/${stats.length} page(s) need OCR`,
+        );
+        console.log(
+          ["page", "text", "cov", "images", "garbled", "vector", "ocr"].join(
+            "\t",
+          ),
+        );
+        for (const s of stats) {
+          const vector =
+            s.uncoveredVectorArea !== undefined
+              ? s.uncoveredVectorArea.toFixed(0)
+              : "-";
+          console.log(
+            [
+              s.pageNumber,
+              s.textLength,
+              s.textCoverage.toFixed(2),
+              s.hasSubstantialImages ? "yes" : "no",
+              s.isGarbled ? "yes" : "no",
+              vector,
+              s.needsOcr ? "yes" : "no",
+            ].join("\t"),
+          );
+        }
+      }
+
+      // Exit non-zero when any page needs OCR, so the command is usable as a
+      // shell predicate (e.g. `is-complex doc.pdf && parse --no-ocr`).
+      if (complexPages > 0) process.exit(1);
+    } catch (err) {
+      console.error(
+        `Error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      process.exit(1);
+    }
+  });
+
+program
   .command("screenshot")
   .description("Generate screenshots of document pages")
   .argument("<file>", "Path to the document file")

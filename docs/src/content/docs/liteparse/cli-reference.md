@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-LiteParse provides the `lit` CLI with three commands: `parse`, `batch-parse`, and `screenshot`. The CLI is the same whether installed via `npm`, `pip`, or built from Rust source.
+LiteParse provides the `lit` CLI with four commands: `parse`, `batch-parse`, `screenshot`, and `is-complex`. The CLI is the same whether installed via `npm`, `pip`, or built from Rust source.
 
 ## `lit parse`
 
@@ -160,6 +160,47 @@ lit screenshot document.pdf --target-pages "1-5" --dpi 300 -o ./pages
 
 # Specific pages only
 lit screenshot document.pdf --target-pages "1,5,10" -o ./pages
+```
+
+---
+
+## `lit is-complex`
+
+Check whether a document needs OCR or heavier parsing — a cheap pre-parse pass over the text layer only (no rasterization, no OCR). See the [Document Complexity guide](/liteparse/guides/complexity/) for details.
+
+```
+lit is-complex [options] <file>
+```
+
+The command prints per-page JSON to **stdout**, a human-readable verdict to **stderr**, and exits **non-zero when any page needs OCR** — so it works as a shell predicate or a `jq` source.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `file` | Path to the document file |
+
+### Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--compact` | Emit dense, whitespace-free JSON instead of pretty-printed | — |
+| `--max-pages <n>` | Maximum pages to check | `1000` |
+| `--target-pages <pages>` | Pages to check (e.g., `"1-5,10,15-20"`) | — (all pages) |
+| `--password <password>` | Password for encrypted/protected documents | — |
+| `-q, --quiet` | Suppress the stderr verdict | — |
+
+### Examples
+
+```bash
+# Print the complexity verdict and per-page JSON
+lit is-complex document.pdf
+
+# Use as a shell predicate: only parse with --no-ocr when simple
+lit is-complex document.pdf --quiet && lit parse document.pdf --no-ocr
+
+# List the page numbers that need OCR
+lit is-complex document.pdf --compact | jq '[.[] | select(.needs_ocr) | .page_number]'
 ```
 
 ---

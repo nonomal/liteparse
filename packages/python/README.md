@@ -87,6 +87,33 @@ for s in screenshots:
         f.write(s.image_bytes)
 ```
 
+## Document Complexity
+
+Before committing to a full parse, check whether a document needs OCR or heavier
+processing. `is_complex` is a cheap, text-layer-only pass that returns one entry per page
+with a `needs_ocr` verdict and the signals behind it — useful for routing documents to
+different pipelines, rejecting ones you can't handle, or estimating cost.
+
+```python
+parser = LiteParse()
+pages = parser.is_complex("document.pdf")
+
+if any(p.needs_ocr for p in pages):
+    # Route to the OCR-enabled pipeline
+    result = parser.parse("document.pdf")
+else:
+    # Cheap path — skip OCR entirely
+    result = LiteParse(ocr_enabled=False).parse("document.pdf")
+
+# Inspect why specific pages were flagged
+for page in pages:
+    if page.needs_ocr:
+        print(f"Page {page.page_number}: {', '.join(page.reasons)}")
+```
+
+`reasons` is one of `"scanned"`, `"no-text"`, `"sparse-text"`, `"embedded-images"`,
+`"garbled"`, or `"vector-text"`. Raw bytes work here too.
+
 ## Supported Formats
 
 - PDF (`.pdf`)
@@ -104,4 +131,5 @@ lit parse document.pdf
 lit parse document.pdf --format json -o output.json
 lit screenshot document.pdf -o ./screenshots
 lit batch-parse ./input ./output
+lit is-complex document.pdf
 ```

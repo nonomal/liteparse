@@ -37,6 +37,7 @@ hard stuff so your models see clean, structured data and markdown.
   - **Built-in**: Tesseract (zero setup, bundled with the library)
   - **HTTP Servers**: Plug in any OCR server (EasyOCR, PaddleOCR, custom)
   - **Standard API**: Simple, well-defined OCR API specification
+- **Complexity Detection**: Cheaply check whether a document needs OCR or heavier parsing — route, reject, or estimate cost before a full parse
 - **Screenshot Generation**: Generate high-quality page screenshots for LLM agents
 - **Multiple Output Formats**: Markdown, JSON, and Text
 - **Markdown Output**: Structured Markdown with headings, tables, lists, images, and links — great for feeding LLMs and RAG pipelines
@@ -196,6 +197,28 @@ Image handling is controlled by `--image-mode`:
 > [LlamaParse](https://developers.llamaindex.ai/python/cloud/llamaparse/?utm_source=github&utm_medium=liteparse)
 > remains the most accurate option.
 
+### Check Complexity
+
+Before committing to a full parse, check whether a document actually needs OCR or
+heavier processing. This is a cheap, text-layer-only pass — useful for routing
+documents to different pipelines, rejecting ones you can't handle, or estimating cost.
+
+```bash
+# Print the complexity verdict and per-page JSON
+lit is-complex document.pdf
+
+# Use as a shell predicate — only parse with --no-ocr when the document is simple
+lit is-complex document.pdf --quiet && lit parse document.pdf --no-ocr
+
+# List the pages that need OCR
+lit is-complex document.pdf --compact | jq '[.[] | select(.needs_ocr) | .page_number]'
+```
+
+It always prints per-page JSON to **stdout**, a human-readable verdict to **stderr**, and
+exits **non-zero when any page needs OCR**. Each page carries a `needs_ocr` verdict and a
+list of `reasons` (`scanned`, `no-text`, `sparse-text`, `embedded-images`, `garbled`,
+`vector-text`).
+
 ### Batch Parsing
 
 Parse an entire directory of documents:
@@ -280,6 +303,23 @@ Options:
   -q, --quiet                  Suppress progress output
   -h, --help                   Print help
 ```
+
+#### Is-Complex Command
+
+```
+lit is-complex [OPTIONS] <file>
+
+Options:
+      --compact                Emit dense, whitespace-free JSON instead of pretty-printed
+      --max-pages <n>          Max pages to check [default: 1000]
+      --target-pages <pages>   Pages to check (e.g., "1-5,10,15-20")
+      --password <password>    Password for encrypted documents
+  -q, --quiet                  Suppress the stderr verdict
+  -h, --help                   Print help
+```
+
+Prints per-page JSON to stdout and a `COMPLEX`/`SIMPLE` verdict to stderr; exits non-zero
+when any page needs OCR, so it composes as a shell predicate.
 
 ## OCR Setup
 

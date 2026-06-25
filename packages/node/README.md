@@ -90,6 +90,34 @@ for (const s of screenshots) {
 }
 ```
 
+## Document Complexity
+
+Before committing to a full parse, check whether a document needs OCR or heavier
+processing. `isComplex` is a cheap, text-layer-only pass that returns one entry per page
+with a `needsOcr` verdict and the signals behind it — useful for routing documents to
+different pipelines, rejecting ones you can't handle, or estimating cost.
+
+```typescript
+const parser = new LiteParse();
+const pages = await parser.isComplex('document.pdf');
+
+if (pages.some((p) => p.needsOcr)) {
+  // Route to the OCR-enabled pipeline
+  const result = await parser.parse('document.pdf');
+} else {
+  // Cheap path — skip OCR entirely
+  const result = await new LiteParse({ ocrEnabled: false }).parse('document.pdf');
+}
+
+// Inspect why specific pages were flagged
+for (const page of pages.filter((p) => p.needsOcr)) {
+  console.log(`Page ${page.pageNumber}: ${page.reasons.join(', ')}`);
+}
+```
+
+`reasons` is one of `"scanned"`, `"no-text"`, `"sparse-text"`, `"embedded-images"`,
+`"garbled"`, or `"vector-text"`. Raw bytes work here too.
+
 ## Supported Formats
 
 - PDF (`.pdf`)
@@ -107,4 +135,5 @@ lit parse document.pdf
 lit parse document.pdf --format json -o output.json
 lit screenshot document.pdf -o ./screenshots
 lit batch-parse ./input ./output
+lit is-complex document.pdf
 ```

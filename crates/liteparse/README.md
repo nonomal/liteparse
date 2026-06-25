@@ -102,6 +102,32 @@ let result = parser.parse_input(PdfInput::Bytes(pdf_bytes)).await?;
 println!("{}", result.text);
 ```
 
+## Document Complexity
+
+Before committing to a full parse, check whether a document needs OCR or heavier
+processing. `is_complex` is a cheap, text-layer-only pass that returns a
+`PageComplexityStats` per page with a `needs_ocr` verdict and the signals behind it —
+useful for routing documents to different pipelines, rejecting ones you can't handle, or
+estimating cost.
+
+```rust
+use liteparse::types::PdfInput;
+
+let parser = LiteParse::new(LiteParseConfig::default());
+let pages = parser.is_complex(PdfInput::Path("document.pdf".into())).await?;
+
+if pages.iter().any(|p| p.needs_ocr) {
+    // Route to the OCR-enabled pipeline, inspect `p.reasons`, etc.
+    for page in pages.iter().filter(|p| p.needs_ocr) {
+        println!("Page {} needs OCR: {:?}", page.page_number, page.reasons);
+    }
+}
+```
+
+`reasons` is a `Vec<ComplexityReason>` (`Scanned`, `NoText`, `SparseText`,
+`EmbeddedImages`, `Garbled`, `VectorText`); new variants may be added over time, so match
+leniently.
+
 ## Custom OCR Engine
 
 Implement the `OcrEngine` trait to plug in your own OCR backend:
@@ -135,6 +161,7 @@ lit parse document.pdf --format json -o output.json
 lit parse document.pdf --format markdown -o output.md
 lit screenshot document.pdf -o ./screenshots
 lit batch-parse ./input ./output
+lit is-complex document.pdf
 ```
 
 See `lit --help` for all options.

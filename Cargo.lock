@@ -1246,7 +1246,7 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "liteparse"
-version = "2.1.1"
+version = "2.2.0"
 dependencies = [
  "blake3",
  "clap",
@@ -1270,7 +1270,7 @@ dependencies = [
 
 [[package]]
 name = "liteparse-napi"
-version = "2.1.1"
+version = "2.2.0"
 dependencies = [
  "image",
  "liteparse",
@@ -1305,7 +1305,7 @@ dependencies = [
 
 [[package]]
 name = "liteparse-python"
-version = "2.1.1"
+version = "2.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1321,7 +1321,7 @@ dependencies = [
 
 [[package]]
 name = "liteparse-wasm"
-version = "2.1.1"
+version = "2.2.0"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",

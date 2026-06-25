@@ -41,6 +41,28 @@ pub struct ScreenshotResult {
     pub image_bytes: Vec<u8>,
 }
 
+/// Env var pointing at a fragmented glyph-outline → unicode font database
+/// directory (`%02x%02x.msgpack` shards). When set, [`LiteParse::new`]
+/// auto-wires a [`crate::FontDbResolver`] so buggy/obfuscated-font glyphs are
+/// recovered without any extra wiring. Unset (default) leaves the hook dormant.
+#[cfg(not(target_arch = "wasm32"))]
+const FONT_DB_DIR_ENV: &str = "LITEPARSE_FONT_DB_DIR";
+
+/// Build the default glyph resolver from the environment, if configured.
+#[cfg(not(target_arch = "wasm32"))]
+fn default_glyph_resolver() -> Option<std::sync::Arc<dyn crate::GlyphResolver>> {
+    let dir = std::env::var_os(FONT_DB_DIR_ENV)?;
+    if dir.is_empty() {
+        return None;
+    }
+    Some(std::sync::Arc::new(crate::FontDbResolver::new(dir)))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn default_glyph_resolver() -> Option<std::sync::Arc<dyn crate::GlyphResolver>> {
+    None
+}
+
 /// Main LiteParse orchestrator.
 ///
 /// ### Thread safety
@@ -63,6 +85,11 @@ pub struct LiteParse {
     /// mechanism for plugging an OCR engine in environments without the
     /// built-ins (e.g. WASM, where the JS side supplies a callback engine).
     ocr_engine_override: Option<std::sync::Arc<dyn OcrEngine>>,
+    /// Optional caller-provided glyph recovery hook. When set, it is consulted
+    /// as a last resort for buggy/obfuscated-font glyphs that liteparse's
+    /// built-in cmap/AGL recovery could not decode. The published package ships
+    /// none; the platform build injects an outline → unicode font-DB resolver.
+    glyph_resolver: Option<std::sync::Arc<dyn crate::GlyphResolver>>,
 }
 
 impl LiteParse {
@@ -70,6 +97,7 @@ impl LiteParse {
         Self {
             config,
             ocr_engine_override: None,
+            glyph_resolver: default_glyph_resolver(),
         }
     }
 
@@ -78,6 +106,93 @@ impl LiteParse {
     pub fn with_ocr_engine(mut self, engine: std::sync::Arc<dyn OcrEngine>) -> Self {
         self.ocr_engine_override = Some(engine);
         self
+    }
+
+    /// Inject a glyph recovery hook. When set, glyphs that liteparse considers
+    /// untrusted and cannot decode with its built-in cmap/AGL recovery are
+    /// passed to the resolver as vector-outline segments for a final attempt.
+    pub fn with_glyph_resolver(
+        mut self,
+        resolver: std::sync::Arc<dyn crate::GlyphResolver>,
+    ) -> Self {
+        self.glyph_resolver = Some(resolver);
+        self
+    }
+
+    /// Parse the configured `target_pages` string (e.g. `"1-5,10"`) into an
+    /// explicit page list, or `None` when no selection was configured.
+    fn resolve_target_pages(&self) -> Result<Option<Vec<u32>>, LiteParseError> {
+        self.config
+            .target_pages
+            .as_ref()
+            .map(|s| parse_target_pages(s))
+            .transpose()
+            .map_err(|e| format!("invalid --target-pages: {}", e).into())
+    }
+
+    /// Determine the complexity of each page in a document, returning a vector
+    /// of `PageComplexityStats` for each page. This is useful for deciding
+    /// whether to enable OCR on a per-page basis, or for other heuristics.
+    pub async fn is_complex(
+        &self,
+        input: PdfInput,
+    ) -> Result<Vec<ocr_merge::PageComplexityStats>, LiteParseError> {
+        let log = |msg: &str| {
+            if !self.config.quiet {
+                eprintln!("{}", msg);
+            }
+        };
+
+        let t0 = web_time::Instant::now();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let (validated_input, _guard) =
+            conversion::resolve_pdf_input(input, self.config.password.as_deref(), false).await?;
+
+        #[cfg(target_arch = "wasm32")]
+        let validated_input = input;
+
+        // Determine which pages to extract
+        let target_pages = self.resolve_target_pages()?;
+
+        // Load the document and extract text items. Complexity signals derive
+        // from the text layer and page objects only — embedded image rasters
+        // and hyperlinks are irrelevant here, so both are skipped to keep this
+        // pass fast (its whole purpose is a cheap pre-OCR check).
+        let password = self.config.password.as_deref();
+
+        let lib = Library::init();
+        let document = extract::load_document_from_input(&lib, &validated_input, password)?;
+
+        let (pages, _) = extract::extract_pages_and_images(
+            &document,
+            target_pages.as_deref(),
+            self.config.max_pages,
+            false, // render_images: image rasters not needed for complexity
+            false, // extract_links: irrelevant for complexity stats
+            self.glyph_resolver.as_deref(),
+        )?;
+        let t_extract = web_time::Instant::now();
+        log(&format!(
+            "[liteparse] extract: {:.1}ms ({} pages)",
+            t_extract.duration_since(t0).as_secs_f64() * 1000.0,
+            pages.len()
+        ));
+
+        let t_complexity = web_time::Instant::now();
+        let page_complexities = pages
+            .iter()
+            .map(|page| {
+                let page_obj = document.page((page.page_number - 1) as i32)?;
+                ocr_merge::calculate_page_complexity(page, &page_obj)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        log(&format!(
+            "[liteparse] complexity: {:.1}ms",
+            t_complexity.duration_since(t_extract).as_secs_f64() * 1000.0
+        ));
+
+        Ok(page_complexities)
     }
 
     /// Parse a document from a file path, returning structured results.
@@ -113,13 +228,7 @@ impl LiteParse {
         let validated_input = input;
 
         // Determine which pages to extract
-        let target_pages = self
-            .config
-            .target_pages
-            .as_ref()
-            .map(|s| parse_target_pages(s))
-            .transpose()
-            .map_err(|e| format!("invalid --target-pages: {}", e))?;
+        let target_pages = self.resolve_target_pages()?;
 
         // Extract text (and pre-render OCR pages in one PDF load when OCR is on).
         // The PDFium lock is acquired for this entire critical section and
@@ -178,6 +287,7 @@ impl LiteParse {
                 render_images,
                 self.config.extract_links
                     && self.config.output_format == crate::config::OutputFormat::Markdown,
+                self.glyph_resolver.as_deref(),
             )?;
             let t_extract = web_time::Instant::now();
             log(&format!(

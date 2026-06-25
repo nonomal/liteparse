@@ -5,6 +5,7 @@ use liteparse::extract;
 use liteparse::output::{json, text};
 use liteparse::parser::LiteParse;
 use liteparse::render;
+use liteparse::types::PdfInput;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -25,6 +26,8 @@ enum Commands {
     Screenshot(ScreenshotCommand),
     /// Parse multiple documents in batch mode
     BatchParse(BatchParseCommand),
+    /// Check if a document is "complex" enough to require OCR or other advanced parsing
+    IsComplex(IsComplexCommand),
     /// Extract raw text items from a PDF file (no grid projection) [dev tool]
     #[command(hide = true)]
     Extract(ExtractCommand),
@@ -215,6 +218,33 @@ struct ExtractCommand {
     /// Target page number (1-based)
     #[arg(long)]
     page_num: Option<u32>,
+}
+
+#[derive(Args, Debug)]
+struct IsComplexCommand {
+    /// Input file path
+    file: String,
+
+    /// Emit dense, whitespace-free JSON instead of pretty-printed (still valid
+    /// for `jq` and friends).
+    #[arg(long)]
+    compact: bool,
+
+    /// Max pages to parse
+    #[arg(long, default_value = "1000")]
+    max_pages: usize,
+
+    /// Target pages (e.g., "1-5,10,15-20")
+    #[arg(long)]
+    target_pages: Option<String>,
+
+    /// Password for encrypted/protected documents
+    #[arg(long)]
+    password: Option<String>,
+
+    /// Suppress progress output
+    #[arg(short, long)]
+    quiet: bool,
 }
 
 fn parse_output_format(s: &str) -> Result<OutputFormat, String> {
@@ -410,11 +440,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             for file_path in &files {
                 let t0 = web_time::Instant::now();
 
-                // Build output path: mirror directory structure
-                let rel = file_path.strip_prefix(&cmd.input_dir).unwrap_or(file_path);
-                let out_path = std::path::Path::new(&cmd.output_dir)
-                    .join(rel)
-                    .with_extension(out_ext);
+                let out_path =
+                    batch_output_path(file_path, &cmd.input_dir, &cmd.output_dir, out_ext);
 
                 if let Some(parent) = out_path.parent() {
                     std::fs::create_dir_all(parent)?;
@@ -474,6 +501,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::ImageBounds(cmd) => {
             render::image_bounds(&cmd.pdf_path, cmd.page_num)?;
         }
+
+        Commands::IsComplex(cmd) => {
+            let config = LiteParseConfig {
+                max_pages: cmd.max_pages,
+                target_pages: cmd.target_pages,
+                password: cmd.password,
+                quiet: cmd.quiet,
+                ..Default::default()
+            };
+            let lp = LiteParse::new(config);
+            let is_complex = lp.is_complex(PdfInput::Path(cmd.file)).await?;
+
+            let complex_pages = is_complex.iter().filter(|c| c.needs_ocr).count();
+
+            // Always emit JSON on stdout so the command composes with `jq` and
+            // friends without a flag. Pretty by default for human readability;
+            // `--compact` drops the whitespace. Both parse identically.
+            let json = if cmd.compact {
+                serde_json::to_string(&is_complex)?
+            } else {
+                serde_json::to_string_pretty(&is_complex)?
+            };
+            println!("{}", json);
+
+            // The human-readable verdict goes to stderr so it never pollutes the
+            // JSON on stdout. The exit code below carries the same signal for
+            // scripts that don't want to read either stream.
+            if !cmd.quiet {
+                let verdict = if complex_pages > 0 {
+                    "COMPLEX"
+                } else {
+                    "SIMPLE"
+                };
+                eprintln!(
+                    "{} — {}/{} page(s) need OCR",
+                    verdict,
+                    complex_pages,
+                    is_complex.len()
+                );
+            }
+
+            // Exit non-zero when any page needs OCR, so the command is usable as
+            // a shell predicate: exit 0 (simple) → `&& parse --no-ocr` is safe.
+            if complex_pages > 0 {
+                std::process::exit(1);
+            }
+        }
     }
 
     Ok(())
@@ -489,6 +563,42 @@ fn collect_files(
     collect_files_inner(std::path::Path::new(dir), recursive, ext_filter, &mut files)?;
     files.sort();
     Ok(files)
+}
+
+fn batch_output_path(
+    file_path: &str,
+    input_dir: &str,
+    output_dir: &str,
+    out_ext: &str,
+) -> std::path::PathBuf {
+    let file_path = std::path::Path::new(file_path);
+    let rel = file_path
+        .strip_prefix(std::path::Path::new(input_dir))
+        .unwrap_or(file_path);
+
+    std::path::Path::new(output_dir)
+        .join(rel)
+        .with_extension(out_ext)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::batch_output_path;
+    use std::path::Path;
+
+    #[test]
+    fn batch_output_path_preserves_output_dir_without_trailing_slash() {
+        let out_path = batch_output_path("docs/report.pdf", "docs", "out", "txt");
+
+        assert_eq!(out_path, Path::new("out/report.txt"));
+    }
+
+    #[test]
+    fn batch_output_path_mirrors_nested_files_without_trailing_slash() {
+        let out_path = batch_output_path("docs/nested/report.pdf", "docs", "out", "md");
+
+        assert_eq!(out_path, Path::new("out/nested/report.md"));
+    }
 }
 
 fn collect_files_inner(

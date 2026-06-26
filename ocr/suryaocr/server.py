@@ -1,10 +1,27 @@
 import io
 import logging
+import os
 import re
 import traceback
 from html import unescape
 from html.parser import HTMLParser
 from typing import Any
+
+# Surya 2 is a VLM-backed model: text recognition runs through an inference
+# backend. Default to the CPU-friendly llama.cpp backend, which spawns a
+# `llama-server` binary (bundled in the Docker image; install locally with
+# `brew install llama.cpp` or from github.com/ggml-org/llama.cpp/releases) and
+# downloads the GGUF weights on first use. Override for GPU with
+# SURYA_INFERENCE_BACKEND=vllm, or attach to an already-running inference
+# server with SURYA_INFERENCE_URL. These must be set before importing surya.
+os.environ.setdefault("SURYA_INFERENCE_BACKEND", "llamacpp")
+os.environ.setdefault("LLAMA_CPP_NGL", "0")  # 0 = CPU; set 99 for full GPU offload
+# Surya only sends a grammar for the layout step (LAYOUT_JSON_SCHEMA), whose
+# regex `pattern` the upstream llama.cpp json-schema→GBNF converter cannot
+# parse ("failed to parse grammar"). Disable guided layout so layout runs as
+# free generation (Surya parses the output itself); block/full-page OCR never
+# use a grammar. Required for the llama.cpp backend to return results.
+os.environ.setdefault("SURYA_GUIDED_LAYOUT", "false")
 
 import uvicorn
 from fastapi import FastAPI, HTTPException

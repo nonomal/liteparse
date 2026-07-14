@@ -134,8 +134,6 @@ struct PyParsedPage {
     markdown: String,
     #[pyo3(get)]
     text_items: Vec<PyTextItem>,
-    /// Per-page complexity signals. Populated only when parsing was configured
-    /// with `include_complexity=True`; `None` otherwise.
     #[pyo3(get)]
     complexity: Option<PyPageComplexityStats>,
 }

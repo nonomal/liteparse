@@ -263,8 +263,6 @@ pub struct ParsedPage {
     pub text: String,
     pub markdown: String,
     pub text_items: Vec<TextItem>,
-    /// Per-page complexity signals. Present only when parsing was configured
-    /// with `includeComplexity`; omitted otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub complexity: Option<PageComplexityStats>,
 }

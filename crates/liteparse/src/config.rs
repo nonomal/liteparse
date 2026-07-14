@@ -74,9 +74,7 @@ pub struct LiteParseConfig {
     /// Compute per-page complexity signals during `parse` and attach them to
     /// each `ParsedPage` (surfaced as a `complexity` object per page in JSON).
     /// These are the same signals the standalone `is_complex` API returns.
-    /// Default `false`: the vector-text detection walk this runs is only worth
-    /// paying for when a caller actually consumes the signals, so parse stays
-    /// on its cheap path unless this is explicitly opted into.
+    /// Default `false`.
     pub include_complexity: bool,
 }
 

@@ -411,8 +411,6 @@ pub struct JsParsedPage {
     pub text: String,
     pub markdown: String,
     pub text_items: Vec<JsTextItem>,
-    /// Per-page complexity signals. Present only when parsing was configured
-    /// with `includeComplexity`; `undefined`/`None` otherwise.
     pub complexity: Option<JsPageComplexityStats>,
 }
 

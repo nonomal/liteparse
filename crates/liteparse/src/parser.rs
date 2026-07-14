@@ -324,9 +324,7 @@ impl LiteParse {
             } else {
                 Vec::new()
             };
-            // Per-page complexity signals, opt-in via `include_complexity`. Needs
-            // the live PDFium document (image / filled-path geometry), so it runs
-            // here inside the lock; empty otherwise so the cheap path pays nothing.
+
             let complexity = if self.config.include_complexity {
                 pages
                     .iter()

@@ -24,8 +24,6 @@ pub(crate) struct JsonPage {
     pub height: f32,
     pub text: String,
     pub text_items: Vec<JsonTextItem>,
-    /// Per-page complexity signals. Present only when parsing was configured
-    /// with `include_complexity` (otherwise omitted from the JSON entirely).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub complexity: Option<PageComplexityStats>,
 }

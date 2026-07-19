@@ -646,8 +646,15 @@ fn extract_page_text_items(
             continue;
         }
 
-        // Spaces: mark that we're in a pending-space state.
-        if c == ' ' {
+        // Spaces: mark that we're in a pending-space state. Covers all Unicode
+        // whitespace (ASCII space, U+3000 IDEOGRAPHIC SPACE, NBSP, en/em spaces,
+        // etc.), not just U+0020. Non-ASCII whitespace glyphs previously fell
+        // through and were added to the box geometry, then stripped from the
+        // text by `str::trim()` in `break_word`/`flush` — inflating item/word
+        // box width by one glyph advance per leading/trailing space while `text`
+        // reported the trimmed string (#360). Routing them here keeps text and
+        // box in agreement and normalizes internal runs to a single space.
+        if c.is_whitespace() {
             seg.mark_pending_space();
             continue;
         }

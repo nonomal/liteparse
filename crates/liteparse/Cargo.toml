@@ -16,6 +16,14 @@ path = "src/main.rs"
 
 [features]
 default = ["tesseract"]
+oar-ocr = ["dep:oar-ocr"]
+oar-ocr-auto-download = ["oar-ocr", "oar-ocr/auto-download"]
+oar-ocr-cuda = ["oar-ocr", "oar-ocr/cuda"]
+oar-ocr-tensorrt = ["oar-ocr", "oar-ocr/tensorrt"]
+oar-ocr-directml = ["oar-ocr", "oar-ocr/directml"]
+oar-ocr-coreml = ["oar-ocr", "oar-ocr/coreml"]
+oar-ocr-webgpu = ["oar-ocr", "oar-ocr/webgpu"]
+oar-ocr-openvino = ["oar-ocr", "oar-ocr/openvino"]
 tesseract = ["dep:tesseract-rs"]
 
 [dependencies]
@@ -37,6 +45,7 @@ url = "2"
 web-time = "1.1.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+oar-ocr = { version = "0.8", optional = true }
 rmp = "0.8"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "fs", "process"] }
 

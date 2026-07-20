@@ -140,9 +140,82 @@ let parser = LiteParse::new(LiteParseConfig::default())
     .with_ocr_engine(Arc::new(my_engine));
 ```
 
+For a native ONNX backend, enable `oar-ocr` and supply a detection model,
+recognition model, and matching character dictionary:
+
+```rust,no_run
+use liteparse::ocr::oar::OarOcrEngine;
+use liteparse::{LiteParse, LiteParseConfig};
+use std::path::Path;
+use std::sync::Arc;
+
+let models = Path::new("models");
+let engine = OarOcrEngine::from_models(
+    models.join("pp-ocrv6_small_det.onnx"),
+    models.join("pp-ocrv6_small_rec.onnx"),
+    models.join("ppocrv6_dict.txt"),
+)?;
+
+let parser = LiteParse::new(LiteParseConfig::default())
+    .with_ocr_engine(Arc::new(engine));
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+For opt-in model downloads, enable `oar-ocr-auto-download` and use a preset. On
+first use, `oar-ocr` downloads the detection model, recognition model, and
+matching dictionary from ModelScope, verifies their SHA-256 digests, and caches
+them under `$OAR_HOME` (default `~/.oar`):
+
+```rust,no_run
+use liteparse::ocr::oar::OarOcrEngine;
+
+// Smallest / fastest PP-OCRv6 configuration.
+let engine = OarOcrEngine::ppocr_v6_tiny()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Presets cover the current and previous PP-OCR generations, from fastest to most
+accurate: `ppocr_v6_tiny`, `ppocr_v6_small`, and `ppocr_v6_medium`. Each wires the correct
+detector/recognizer/dictionary trio. For PP-OCRv4, a language-specific
+recognizer, or a custom mix, use `from_models` with a matching dictionary.
+
+To mix a detector, recognizer, and dictionary yourself, pass registered bare
+file names to `from_models`. Pair the recognizer with its matching dictionary —
+the tiny recognizer needs `ppocrv6_tiny_dict.txt`, while the larger models use
+`ppocrv6_dict.txt`; a mismatched dictionary silently produces garbled text:
+
+```rust,no_run
+use liteparse::ocr::oar::OarOcrEngine;
+
+let engine = OarOcrEngine::from_models(
+    "pp-ocrv6_small_det.onnx",
+    "pp-ocrv6_small_rec.onnx",
+    "ppocrv6_dict.txt",
+)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+All three artifacts also accept in-memory bytes, so the whole pipeline can be
+embedded with `include_bytes!` rather than shipped as files. Use `OAROCRBuilder`
+with `OarOcrEngine::from_builder` for model-specific settings or optional
+orientation and rectification models. The fallible constructors return
+`liteparse::LiteParseError`. All constructors use conservative batch sizes and
+serialize page inference to avoid multiplying inference memory across
+concurrently scheduled pages.
+`OcrOptions::language` is not interpreted: the recognition model and character
+dictionary define the supported languages, and a configured `ocr_language`
+triggers a one-time warning to make that explicit.
+
 ## Features
 
 - **`tesseract`** (default) — Built-in Tesseract OCR via `tesseract-rs`. Disable with `default-features = false` if you don't need OCR or want to use an HTTP OCR server instead.
+- **`oar-ocr`** — Optional native ONNX backend via `oar-ocr`. Local or in-memory models; non-WASM Rust API only.
+- **`oar-ocr-auto-download`** — Enables SHA-256-verified download and caching of registered model file names through `oar-ocr`.
+- **`oar-ocr-cuda`**, **`oar-ocr-tensorrt`**, **`oar-ocr-directml`**, **`oar-ocr-coreml`**, **`oar-ocr-webgpu`**, **`oar-ocr-openvino`** — Forward the selected ONNX Runtime execution provider to `oar-ocr`.
+
+The Node.js, Python, and WASM bindings build LiteParse with default features
+disabled and do not expose these OAR features, so their published binaries do
+not inherit the OAR model or runtime dependency footprint.
 
 ## Supported Formats
 

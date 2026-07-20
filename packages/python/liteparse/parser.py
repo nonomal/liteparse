@@ -361,6 +361,14 @@ class LiteParse:
             password=cfg.password,
             quiet=cfg.quiet,
             num_workers=cfg.num_workers,
+            image_mode=cfg.image_mode,
+            extract_links=cfg.extract_links,
+            ocr_failure_fatal=cfg.ocr_failure_fatal,
+            ocr_hedge_delays_ms=list(cfg.ocr_hedge_delays_ms),
+            emit_word_boxes=cfg.emit_word_boxes,
+            crop_box=cfg.crop_box,
+            skip_diagonal_text=cfg.skip_diagonal_text,
+            include_complexity=cfg.include_complexity,
         )
 
     def __repr__(self) -> str:

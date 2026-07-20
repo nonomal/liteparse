@@ -373,6 +373,22 @@ struct PyLiteParseConfig {
     quiet: bool,
     #[pyo3(get)]
     num_workers: usize,
+    #[pyo3(get)]
+    image_mode: String,
+    #[pyo3(get)]
+    extract_links: bool,
+    #[pyo3(get)]
+    ocr_failure_fatal: bool,
+    #[pyo3(get)]
+    ocr_hedge_delays_ms: Vec<u64>,
+    #[pyo3(get)]
+    emit_word_boxes: bool,
+    #[pyo3(get)]
+    crop_box: Option<(f32, f32, f32, f32)>,
+    #[pyo3(get)]
+    skip_diagonal_text: bool,
+    #[pyo3(get)]
+    include_complexity: bool,
 }
 
 #[pymethods]
@@ -409,6 +425,21 @@ impl PyLiteParseConfig {
             password: cfg.password.clone(),
             quiet: cfg.quiet,
             num_workers: cfg.num_workers,
+            image_mode: match cfg.image_mode {
+                ImageMode::Off => "off".to_string(),
+                ImageMode::Placeholder => "placeholder".to_string(),
+                ImageMode::Embed => "embed".to_string(),
+            },
+            extract_links: cfg.extract_links,
+            ocr_failure_fatal: cfg.ocr_failure_fatal,
+            ocr_hedge_delays_ms: cfg.ocr_hedge_delays_ms.clone(),
+            emit_word_boxes: cfg.emit_word_boxes,
+            crop_box: cfg
+                .crop_box
+                .as_ref()
+                .map(|c| (c.top, c.right, c.bottom, c.left)),
+            skip_diagonal_text: cfg.skip_diagonal_text,
+            include_complexity: cfg.include_complexity,
         }
     }
 }

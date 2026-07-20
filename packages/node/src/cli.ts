@@ -10,6 +10,27 @@ program
   .description("Fast, lightweight PDF and document parsing")
   .version("2.0.0");
 
+/**
+ * Resolve a CLI `<file>` argument into a parser input. `-` means read the
+ * document from stdin (e.g. `curl -sL … | liteparse parse -`); anything else is
+ * passed through as a path. Streaming stdin (rather than `readFileSync(0)`)
+ * avoids EAGAIN on non-blocking pipes.
+ */
+async function resolveInput(file: string): Promise<string | Buffer> {
+  if (file !== "-") return file;
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk as Buffer);
+  }
+  const bytes = Buffer.concat(chunks);
+  if (bytes.length === 0) {
+    throw new Error(
+      "no data on stdin (input `-` expects a document piped in, e.g. `curl … | liteparse parse -`)",
+    );
+  }
+  return bytes;
+}
+
 /** Collect repeated `--ocr-server-header "Name: Value"` flags into an object. */
 function collectHeader(
   value: string,
@@ -61,6 +82,10 @@ program
   .option("--config <file>", "JSON config file path")
   .option("-q, --quiet", "Suppress progress output")
   .option("--num-workers <n>", "Number of concurrent OCR workers", parseInt)
+  .option(
+    "--complexity",
+    "Include per-page complexity signals in JSON output",
+  )
   .action(async (file: string, opts: Record<string, unknown>) => {
     try {
       const config: Partial<LiteParseConfig> = {};
@@ -91,12 +116,13 @@ program
       if (opts.password) config.password = opts.password as string;
       if (opts.quiet) config.quiet = true;
       if (opts.numWorkers) config.numWorkers = opts.numWorkers as number;
+      if (opts.complexity) config.includeComplexity = true;
 
       // Default CLI output to text (library defaults to json)
       if (!config.outputFormat) config.outputFormat = "text";
 
       const parser = new LiteParse(config);
-      const result = await parser.parse(file);
+      const result = await parser.parse(await resolveInput(file));
 
       const output =
         config.outputFormat === "json"
@@ -164,7 +190,7 @@ program
       if (opts.quiet) config.quiet = true;
 
       const parser = new LiteParse(config);
-      const stats = await parser.isComplex(file);
+      const stats = await parser.isComplex(await resolveInput(file));
 
       const complexPages = stats.filter((s) => s.needsOcr).length;
 

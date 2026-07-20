@@ -88,21 +88,6 @@ impl PyTextItem {
 }
 
 impl PyTextItem {
-    fn to_rust(&self) -> liteparse::types::TextItem {
-        liteparse::types::TextItem {
-            text: self.text.clone(),
-            x: self.x as f32,
-            y: self.y as f32,
-            width: self.width as f32,
-            height: self.height as f32,
-            rotation: self.rotation as f32,
-            font_name: self.font_name.clone(),
-            font_size: self.font_size.map(|v| v as f32),
-            confidence: self.confidence.map(|v| v as f32),
-            ..Default::default()
-        }
-    }
-
     fn from_rust(item: liteparse::types::TextItem) -> Self {
         Self {
             text: item.text,
@@ -134,6 +119,8 @@ struct PyParsedPage {
     markdown: String,
     #[pyo3(get)]
     text_items: Vec<PyTextItem>,
+    #[pyo3(get)]
+    complexity: Option<PyPageComplexityStats>,
 }
 
 #[pymethods]
@@ -162,6 +149,10 @@ impl PyParsedPage {
                 .into_iter()
                 .map(PyTextItem::from_rust)
                 .collect(),
+            complexity: page
+                .complexity
+                .as_ref()
+                .map(PyPageComplexityStats::from_rust),
         }
     }
 }
@@ -382,6 +373,22 @@ struct PyLiteParseConfig {
     quiet: bool,
     #[pyo3(get)]
     num_workers: usize,
+    #[pyo3(get)]
+    image_mode: String,
+    #[pyo3(get)]
+    extract_links: bool,
+    #[pyo3(get)]
+    ocr_failure_fatal: bool,
+    #[pyo3(get)]
+    ocr_hedge_delays_ms: Vec<u64>,
+    #[pyo3(get)]
+    emit_word_boxes: bool,
+    #[pyo3(get)]
+    crop_box: Option<(f32, f32, f32, f32)>,
+    #[pyo3(get)]
+    skip_diagonal_text: bool,
+    #[pyo3(get)]
+    include_complexity: bool,
 }
 
 #[pymethods]
@@ -418,6 +425,21 @@ impl PyLiteParseConfig {
             password: cfg.password.clone(),
             quiet: cfg.quiet,
             num_workers: cfg.num_workers,
+            image_mode: match cfg.image_mode {
+                ImageMode::Off => "off".to_string(),
+                ImageMode::Placeholder => "placeholder".to_string(),
+                ImageMode::Embed => "embed".to_string(),
+            },
+            extract_links: cfg.extract_links,
+            ocr_failure_fatal: cfg.ocr_failure_fatal,
+            ocr_hedge_delays_ms: cfg.ocr_hedge_delays_ms.clone(),
+            emit_word_boxes: cfg.emit_word_boxes,
+            crop_box: cfg
+                .crop_box
+                .as_ref()
+                .map(|c| (c.top, c.right, c.bottom, c.left)),
+            skip_diagonal_text: cfg.skip_diagonal_text,
+            include_complexity: cfg.include_complexity,
         }
     }
 }
@@ -458,6 +480,7 @@ impl LiteParse {
         emit_word_boxes = None,
         crop_box = None,
         skip_diagonal_text = None,
+        include_complexity = None,
     ))]
     fn new(
         ocr_language: Option<String>,
@@ -480,6 +503,7 @@ impl LiteParse {
         emit_word_boxes: Option<bool>,
         crop_box: Option<(f32, f32, f32, f32)>,
         skip_diagonal_text: Option<bool>,
+        include_complexity: Option<bool>,
     ) -> PyResult<Self> {
         let mut cfg = LiteParseConfig::default();
         if let Some(v) = ocr_language {
@@ -554,6 +578,9 @@ impl LiteParse {
         }
         if let Some(v) = skip_diagonal_text {
             cfg.skip_diagonal_text = v;
+        }
+        if let Some(v) = include_complexity {
+            cfg.include_complexity = v;
         }
 
         let inner = liteparse::parser::LiteParse::new(cfg.clone());
@@ -656,10 +683,52 @@ impl LiteParse {
 // Module
 // ---------------------------------------------------------------------------
 
+/// Duck-typed input for [`search_items`]. Extracts by attribute name, so it
+/// accepts both the native `PyTextItem` and the pure-Python `TextItem`
+/// dataclass that `LiteParse.parse()` hands back (see `parser.py`,
+/// `_convert_native_result`).
+#[derive(FromPyObject)]
+struct SearchInputItem {
+    text: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    #[pyo3(default)]
+    font_name: Option<String>,
+    #[pyo3(default)]
+    font_size: Option<f64>,
+    #[pyo3(default)]
+    confidence: Option<f64>,
+    #[pyo3(default)]
+    rotation: f64,
+}
+
+impl SearchInputItem {
+    fn to_rust(&self) -> liteparse::types::TextItem {
+        liteparse::types::TextItem {
+            text: self.text.clone(),
+            x: self.x as f32,
+            y: self.y as f32,
+            width: self.width as f32,
+            height: self.height as f32,
+            rotation: self.rotation as f32,
+            font_name: self.font_name.clone(),
+            font_size: self.font_size.map(|v| v as f32),
+            confidence: self.confidence.map(|v| v as f32),
+            ..Default::default()
+        }
+    }
+}
+
 /// Search text items for phrase matches, returning merged items with combined bounding boxes.
 #[pyfunction]
 #[pyo3(signature = (items, phrase, *, case_sensitive = false))]
-fn search_items(items: Vec<PyTextItem>, phrase: String, case_sensitive: bool) -> Vec<PyTextItem> {
+fn search_items(
+    items: Vec<SearchInputItem>,
+    phrase: String,
+    case_sensitive: bool,
+) -> Vec<PyTextItem> {
     let rust_items: Vec<_> = items.iter().map(|i| i.to_rust()).collect();
     let options = liteparse::search::SearchOptions {
         phrase,

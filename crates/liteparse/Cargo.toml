@@ -1,6 +1,6 @@
 [package]
 name = "liteparse"
-version = "2.5.0"
+version = "2.7.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -16,6 +16,14 @@ path = "src/main.rs"
 
 [features]
 default = ["tesseract"]
+oar-ocr = ["dep:oar-ocr"]
+oar-ocr-auto-download = ["oar-ocr", "oar-ocr/auto-download"]
+oar-ocr-cuda = ["oar-ocr", "oar-ocr/cuda"]
+oar-ocr-tensorrt = ["oar-ocr", "oar-ocr/tensorrt"]
+oar-ocr-directml = ["oar-ocr", "oar-ocr/directml"]
+oar-ocr-coreml = ["oar-ocr", "oar-ocr/coreml"]
+oar-ocr-webgpu = ["oar-ocr", "oar-ocr/webgpu"]
+oar-ocr-openvino = ["oar-ocr", "oar-ocr/openvino"]
 tesseract = ["dep:tesseract-rs"]
 
 [dependencies]
@@ -40,6 +48,7 @@ resvg = "0.44"
 usvg = "0.44"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+oar-ocr = { version = "0.8", optional = true }
 rmp = "0.8"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "fs", "process"] }
 

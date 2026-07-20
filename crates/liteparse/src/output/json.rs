@@ -1,3 +1,4 @@
+use crate::ocr_merge::PageComplexityStats;
 use crate::types::ParsedPage;
 use serde::Serialize;
 
@@ -23,6 +24,8 @@ pub(crate) struct JsonPage {
     pub height: f32,
     pub text: String,
     pub text_items: Vec<JsonTextItem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complexity: Option<PageComplexityStats>,
 }
 
 #[derive(Debug, Serialize)]
@@ -54,6 +57,7 @@ pub(crate) fn build_json(pages: &[ParsedPage]) -> ParseResultJson {
                         confidence: item.confidence.or(Some(1.0)),
                     })
                     .collect(),
+                complexity: page.complexity.clone(),
             })
             .collect(),
     }
@@ -98,6 +102,7 @@ mod tests {
             figures: vec![],
             struct_nodes: vec![],
             image_refs: vec![],
+            complexity: None,
         }
     }
 

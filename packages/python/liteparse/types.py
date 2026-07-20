@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional, Tuple
 
 
 @dataclass
@@ -43,6 +43,10 @@ class ParsedPage:
     text: str
     markdown: str = ""
     text_items: List[TextItem] = field(default_factory=list)
+    #: Per-page complexity signals (the same :meth:`LiteParse.is_complex`
+    #: returns). Populated only when parsing with ``include_complexity=True``;
+    #: ``None`` otherwise.
+    complexity: Optional[PageComplexityStats] = None
 
 
 @dataclass
@@ -121,6 +125,16 @@ class LiteParseConfig:
     password: Optional[str]
     quiet: bool
     num_workers: int
+    image_mode: str
+    extract_links: bool
+    ocr_failure_fatal: bool
+    ocr_hedge_delays_ms: List[int]
+    emit_word_boxes: bool
+    #: ``(top, right, bottom, left)`` crop fractions, or ``None`` when the whole
+    #: page is kept.
+    crop_box: Optional[Tuple[float, float, float, float]]
+    skip_diagonal_text: bool
+    include_complexity: bool
 
 
 class ParseError(Exception):

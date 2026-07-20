@@ -542,6 +542,39 @@ impl LiteParse {
 #[derive(Serialize, Tsify)]
 #[tsify(into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
+pub struct LayoutComplexityStats {
+    column_count: usize,
+    ruled_table_count: usize,
+    ruled_table_coverage: f32,
+    text_table_run_count: usize,
+    figure_count: usize,
+    figure_coverage: f32,
+    is_complex: bool,
+    reasons: Vec<String>,
+}
+
+impl LayoutComplexityStats {
+    fn from_rust(stats: &liteparse::ocr_merge::LayoutComplexityStats) -> Self {
+        Self {
+            column_count: stats.column_count,
+            ruled_table_count: stats.ruled_table_count,
+            ruled_table_coverage: stats.ruled_table_coverage,
+            text_table_run_count: stats.text_table_run_count,
+            figure_count: stats.figure_count,
+            figure_coverage: stats.figure_coverage,
+            is_complex: stats.is_complex,
+            reasons: stats
+                .reasons
+                .iter()
+                .map(|r| r.as_str().to_string())
+                .collect(),
+        }
+    }
+}
+
+#[derive(Serialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
 pub struct PageComplexityStats {
     page_number: usize,
     text_length: usize,
@@ -556,6 +589,7 @@ pub struct PageComplexityStats {
     page_area: f32,
     needs_ocr: bool,
     reasons: Vec<String>,
+    layout: Option<LayoutComplexityStats>,
 }
 
 impl PageComplexityStats {
@@ -578,6 +612,7 @@ impl PageComplexityStats {
                 .iter()
                 .map(|r| r.as_str().to_string())
                 .collect(),
+            layout: stats.layout.as_ref().map(LayoutComplexityStats::from_rust),
         }
     }
 }

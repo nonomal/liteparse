@@ -8,6 +8,7 @@ from liteparse._liteparse import search_items as _native_search_items
 
 from .types import (
     ExtractedImage,
+    LayoutComplexityStats,
     LiteParseConfig,
     PageComplexityStats,
     ParsedPage,
@@ -35,6 +36,20 @@ def _convert_complexity(s: Any) -> PageComplexityStats:
         page_area=s.page_area,
         needs_ocr=s.needs_ocr,
         reasons=list(s.reasons),
+        layout=(
+            LayoutComplexityStats(
+                column_count=s.layout.column_count,
+                ruled_table_count=s.layout.ruled_table_count,
+                ruled_table_coverage=s.layout.ruled_table_coverage,
+                text_table_run_count=s.layout.text_table_run_count,
+                figure_count=s.layout.figure_count,
+                figure_coverage=s.layout.figure_coverage,
+                is_complex=s.layout.is_complex,
+                reasons=list(s.layout.reasons),
+            )
+            if getattr(s, "layout", None) is not None
+            else None
+        ),
     )
 
 

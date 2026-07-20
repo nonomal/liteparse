@@ -208,8 +208,13 @@ program
       // the exit code below carries the same signal for scripts.
       if (!opts.quiet) {
         const verdict = complexPages > 0 ? "COMPLEX" : "SIMPLE";
+        const layoutCount = (reason: string) =>
+          stats.filter((s) => s.layout?.reasons.includes(reason)).length;
         console.error(
-          `${verdict} — ${complexPages}/${stats.length} page(s) need OCR`,
+          `${verdict} — ${complexPages}/${stats.length} page(s) need OCR; ` +
+            `layout: ${layoutCount("multi-column")} multi-column, ` +
+            `${layoutCount("table-likely")} table, ` +
+            `${layoutCount("dense-graphics")} graphics-dense`,
         );
       }
 

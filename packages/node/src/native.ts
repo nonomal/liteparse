@@ -126,6 +126,17 @@ export interface NativeScreenshotResult {
   imageBuffer: Buffer;
 }
 
+export interface NativeLayoutComplexityStats {
+  columnCount: number;
+  ruledTableCount: number;
+  ruledTableCoverage: number;
+  textTableRunCount: number;
+  figureCount: number;
+  figureCoverage: number;
+  isComplex: boolean;
+  reasons: string[];
+}
+
 export interface NativePageComplexityStats {
   pageNumber: number;
   textLength: number;
@@ -140,6 +151,7 @@ export interface NativePageComplexityStats {
   pageArea: number;
   needsOcr: boolean;
   reasons: string[];
+  layout?: NativeLayoutComplexityStats;
 }
 
 export interface LiteParseNative {

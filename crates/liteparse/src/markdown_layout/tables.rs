@@ -1132,6 +1132,55 @@ fn absorb_header_lines(
 /// `start`). Caller uses these as cut-points so the per-line classifier never
 /// sees lines inside a table.
 pub(super) fn detect_tables(lines: &[ProjectedLine]) -> Vec<TableRun> {
+    detect_tables_impl(lines, true)
+}
+
+/// Count borderless table runs for the layout-complexity stats. Excludes
+/// description lists — a label/value pair block reads fine as text, so it
+/// should not flag the page as table-bearing. `GridFallback` runs count:
+/// tabular structure the emitter couldn't extract cleanly still marks the
+/// page as table-bearing.
+pub(crate) fn count_text_table_runs(lines: &[ProjectedLine]) -> usize {
+    detect_tables_impl(lines, false).len()
+}
+
+/// Validated ruled-table rects for the layout-complexity stats. Unlike the
+/// raw grid components (`detect_table_rects`, which deliberately over-captures
+/// for use as XY-cut obstacles), each candidate grid here is confirmed against
+/// the projected text by `build_ruled_table` — so a plain boxed callout or a
+/// chart's axis gridlines, which have the lines but not the cell structure,
+/// don't count. Returns the bounding rect of each run's consumed lines.
+pub(crate) fn validated_ruled_table_rects(
+    lines: &[ProjectedLine],
+    graphics: &[GraphicPrimitive],
+    page_width: f32,
+    page_height: f32,
+) -> Vec<Rect> {
+    detect_ruled_tables_global(lines, graphics, page_width, page_height)
+        .into_iter()
+        .filter_map(|(_, consumed)| {
+            let mut x0 = f32::INFINITY;
+            let mut y0 = f32::INFINITY;
+            let mut x1 = f32::NEG_INFINITY;
+            let mut y1 = f32::NEG_INFINITY;
+            for &i in &consumed {
+                let b = &lines[i].bbox;
+                x0 = x0.min(b.x);
+                y0 = y0.min(b.y);
+                x1 = x1.max(b.x + b.width);
+                y1 = y1.max(b.y + b.height);
+            }
+            (x1 > x0 && y1 > y0).then(|| Rect {
+                x: x0,
+                y: y0,
+                width: x1 - x0,
+                height: y1 - y0,
+            })
+        })
+        .collect()
+}
+
+fn detect_tables_impl(lines: &[ProjectedLine], include_desc_lists: bool) -> Vec<TableRun> {
     let mut out = Vec::new();
     let mut i = 0;
     let mut floor = 0;
@@ -1144,7 +1193,10 @@ pub(super) fn detect_tables(lines: &[ProjectedLine]) -> Vec<TableRun> {
             floor = run.end;
             i = run.end;
             out.push(run);
-        } else if let Some(run) = try_detect_description_list(lines, i) {
+        } else if let Some(run) = include_desc_lists
+            .then(|| try_detect_description_list(lines, i))
+            .flatten()
+        {
             floor = run.end;
             i = run.end;
             out.push(run);
@@ -3804,6 +3856,34 @@ mod tests {
             runs[0].start, 1,
             "single-cell title must stay out of the run"
         );
+    }
+
+    #[test]
+    fn count_text_table_runs_excludes_description_lists() {
+        // A label/value stack detects as a description-list run, but must not
+        // count toward the layout-complexity table signal.
+        let lines = vec![
+            line_with_spans(&[("Name:", 50.0), ("Alice", 200.0)], 100.0, 10.0),
+            line_with_spans(&[("Role:", 50.0), ("Engineer", 200.0)], 115.0, 10.0),
+            line_with_spans(&[("Team:", 50.0), ("Platform", 200.0)], 130.0, 10.0),
+            line_with_spans(&[("Start:", 50.0), ("2020", 200.0)], 145.0, 10.0),
+        ];
+        assert_eq!(
+            detect_tables(&lines).len(),
+            1,
+            "sanity: the emitter path should still claim this as a desc-list run"
+        );
+        assert_eq!(count_text_table_runs(&lines), 0);
+    }
+
+    #[test]
+    fn count_text_table_runs_counts_borderless_tables() {
+        let lines = vec![
+            line_with_spans(&[("A", 50.0), ("1", 150.0), ("2", 250.0)], 100.0, 10.0),
+            line_with_spans(&[("B", 50.0), ("3", 150.0), ("4", 250.0)], 115.0, 10.0),
+            line_with_spans(&[("C", 50.0), ("5", 150.0), ("6", 250.0)], 130.0, 10.0),
+        ];
+        assert_eq!(count_text_table_runs(&lines), 1);
     }
 
     #[test]

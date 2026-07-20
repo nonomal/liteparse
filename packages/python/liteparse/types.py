@@ -92,6 +92,33 @@ class ScreenshotResult:
 
 
 @dataclass
+class LayoutComplexityStats:
+    """Layout-difficulty signals for one page (columns, tables, dense
+    graphics), computed from the real grid-projection pass. Orthogonal to
+    ``needs_ocr``: none of these imply OCR — they signal that the text-only
+    path may mangle reading order or structure."""
+    #: Side-by-side text columns found by the layout pass (1 = single column).
+    column_count: int
+    #: Ruled-table grids detected.
+    ruled_table_count: int
+    #: Combined ruled-table area over page area, clamped to 1.
+    ruled_table_coverage: float
+    #: Borderless table runs found by track-aligned text detection
+    #: (description lists excluded). Ruled tables can appear here too — do not
+    #: sum with ``ruled_table_count``.
+    text_table_run_count: int
+    #: Figure regions clustered from vector graphics.
+    figure_count: int
+    #: Combined figure area over page area, clamped to 1.
+    figure_coverage: float
+    #: Whether any layout reason fired.
+    is_complex: bool
+    #: Layout reasons (e.g. ``"multi-column"``, ``"table-likely"``,
+    #: ``"dense-graphics"``); new reasons may be added over time.
+    reasons: list[str]
+
+
+@dataclass
 class PageComplexityStats:
     """Per-page complexity signals used to decide whether a document needs OCR."""
     page_number: int
@@ -107,6 +134,8 @@ class PageComplexityStats:
     page_area: float
     needs_ocr: bool
     reasons: list[str]
+    #: Layout-difficulty signals; see :class:`LayoutComplexityStats`.
+    layout: Optional[LayoutComplexityStats] = None
 
 
 @dataclass

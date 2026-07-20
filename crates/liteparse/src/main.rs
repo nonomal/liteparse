@@ -2,6 +2,7 @@ use clap::{Args, Parser, Subcommand};
 use liteparse::config::{LiteParseConfig, OutputFormat};
 use liteparse::conversion;
 use liteparse::extract;
+use liteparse::ocr_merge::LayoutComplexityReason;
 use liteparse::output::{json, text};
 use liteparse::parser::LiteParse;
 use liteparse::render;
@@ -572,11 +573,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     "SIMPLE"
                 };
+                let layout_count = |reason: LayoutComplexityReason| {
+                    is_complex
+                        .iter()
+                        .filter(|c| {
+                            c.layout
+                                .as_ref()
+                                .is_some_and(|l| l.reasons.contains(&reason))
+                        })
+                        .count()
+                };
                 eprintln!(
-                    "{} — {}/{} page(s) need OCR",
+                    "{} — {}/{} page(s) need OCR; layout: {} multi-column, {} table, {} graphics-dense",
                     verdict,
                     complex_pages,
-                    is_complex.len()
+                    is_complex.len(),
+                    layout_count(LayoutComplexityReason::MultiColumn),
+                    layout_count(LayoutComplexityReason::TableLikely),
+                    layout_count(LayoutComplexityReason::DenseGraphics),
                 );
             }
 

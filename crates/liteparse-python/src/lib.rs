@@ -277,6 +277,56 @@ impl PyScreenshotResult {
 
 #[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
+struct PyLayoutComplexityStats {
+    #[pyo3(get)]
+    column_count: usize,
+    #[pyo3(get)]
+    ruled_table_count: usize,
+    #[pyo3(get)]
+    ruled_table_coverage: f32,
+    #[pyo3(get)]
+    text_table_run_count: usize,
+    #[pyo3(get)]
+    figure_count: usize,
+    #[pyo3(get)]
+    figure_coverage: f32,
+    #[pyo3(get)]
+    is_complex: bool,
+    #[pyo3(get)]
+    reasons: Vec<String>,
+}
+
+#[pymethods]
+impl PyLayoutComplexityStats {
+    fn __repr__(&self) -> String {
+        format!(
+            "LayoutComplexityStats(column_count={}, ruled_table_count={}, figure_coverage={:.2}, is_complex={})",
+            self.column_count, self.ruled_table_count, self.figure_coverage, self.is_complex
+        )
+    }
+}
+
+impl PyLayoutComplexityStats {
+    fn from_rust(stats: &liteparse::ocr_merge::LayoutComplexityStats) -> Self {
+        Self {
+            column_count: stats.column_count,
+            ruled_table_count: stats.ruled_table_count,
+            ruled_table_coverage: stats.ruled_table_coverage,
+            text_table_run_count: stats.text_table_run_count,
+            figure_count: stats.figure_count,
+            figure_coverage: stats.figure_coverage,
+            is_complex: stats.is_complex,
+            reasons: stats
+                .reasons
+                .iter()
+                .map(|r| r.as_str().to_string())
+                .collect(),
+        }
+    }
+}
+
+#[pyclass(frozen, from_py_object)]
+#[derive(Clone)]
 struct PyPageComplexityStats {
     #[pyo3(get)]
     page_number: usize,
@@ -304,6 +354,8 @@ struct PyPageComplexityStats {
     needs_ocr: bool,
     #[pyo3(get)]
     reasons: Vec<String>,
+    #[pyo3(get)]
+    layout: Option<PyLayoutComplexityStats>,
 }
 
 #[pymethods]
@@ -336,6 +388,10 @@ impl PyPageComplexityStats {
                 .iter()
                 .map(|r| r.as_str().to_string())
                 .collect(),
+            layout: stats
+                .layout
+                .as_ref()
+                .map(PyLayoutComplexityStats::from_rust),
         }
     }
 }
@@ -757,6 +813,7 @@ fn _liteparse(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWordBox>()?;
     m.add_class::<PyScreenshotResult>()?;
     m.add_class::<PyPageComplexityStats>()?;
+    m.add_class::<PyLayoutComplexityStats>()?;
     m.add_function(wrap_pyfunction!(run_cli, m)?)?;
     m.add_function(wrap_pyfunction!(search_items, m)?)?;
     Ok(())

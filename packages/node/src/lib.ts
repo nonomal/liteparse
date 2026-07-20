@@ -234,6 +234,44 @@ export interface PageComplexityStats {
    * route on; new reasons may be added over time.
    */
   reasons: string[];
+  /**
+   * Layout-difficulty signals (columns, tables, dense graphics). Orthogonal to
+   * `needsOcr`: none of these imply OCR — they signal that the text-only path
+   * may mangle reading order or structure. Present in `isComplex()` results
+   * and `includeComplexity` parses.
+   */
+  layout?: LayoutComplexityStats;
+}
+
+/**
+ * Layout-difficulty signals for one page, computed from the real
+ * grid-projection pass.
+ */
+export interface LayoutComplexityStats {
+  /** Side-by-side text columns found by the layout pass (1 = single column). */
+  columnCount: number;
+  /** Ruled-table grids detected on the page. */
+  ruledTableCount: number;
+  /** Combined ruled-table area over page area, clamped to 1. */
+  ruledTableCoverage: number;
+  /**
+   * Borderless table runs found by track-aligned text detection (description
+   * lists excluded). Ruled tables can appear here too — don't sum with
+   * `ruledTableCount`; the two discriminate ruled from borderless.
+   */
+  textTableRunCount: number;
+  /** Figure regions clustered from vector graphics. */
+  figureCount: number;
+  /** Combined figure area over page area, clamped to 1. */
+  figureCoverage: number;
+  /** Verdict: whether any layout reason fired. */
+  isComplex: boolean;
+  /**
+   * Every layout reason (e.g. `"multi-column"`, `"table-likely"`,
+   * `"dense-graphics"`). Empty exactly when `isComplex` is false; new reasons
+   * may be added over time.
+   */
+  reasons: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -383,6 +421,18 @@ function toComplexity(s: NativePageComplexityStats): PageComplexityStats {
     pageArea: s.pageArea,
     needsOcr: s.needsOcr,
     reasons: s.reasons,
+    layout: s.layout
+      ? {
+          columnCount: s.layout.columnCount,
+          ruledTableCount: s.layout.ruledTableCount,
+          ruledTableCoverage: s.layout.ruledTableCoverage,
+          textTableRunCount: s.layout.textTableRunCount,
+          figureCount: s.layout.figureCount,
+          figureCoverage: s.layout.figureCoverage,
+          isComplex: s.layout.isComplex,
+          reasons: s.layout.reasons,
+        }
+      : undefined,
   };
 }
 

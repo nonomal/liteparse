@@ -133,6 +133,11 @@ impl LiteParse {
     /// Determine the complexity of each page in a document, returning a vector
     /// of `PageComplexityStats` for each page. This is useful for deciding
     /// whether to enable OCR on a per-page basis, or for other heuristics.
+    ///
+    /// Besides the OCR-need signals, each entry carries `layout` signals
+    /// (multi-column, ruled tables, dense graphics) computed by running the
+    /// real grid-projection pass — useful for routing pages to a
+    /// higher-accuracy pipeline even when no OCR is needed.
     pub async fn is_complex(
         &self,
         input: PdfInput,
@@ -161,36 +166,60 @@ impl LiteParse {
         // pass fast (its whole purpose is a cheap pre-OCR check).
         let password = self.config.password.as_deref();
 
-        let lib = Library::init();
-        let document = extract::load_document_from_input(&lib, &validated_input, password)?;
+        let (pages, mut page_complexities) = {
+            let lib = Library::init();
+            let document = extract::load_document_from_input(&lib, &validated_input, password)?;
 
-        let (pages, _) = extract::extract_pages_and_images(
-            &document,
-            target_pages.as_deref(),
-            self.config.max_pages,
-            false, // render_images: image rasters not needed for complexity
-            false, // extract_links: irrelevant for complexity stats
-            self.glyph_resolver.as_deref(),
-            false, // emit_word_boxes: word boxes not needed for complexity stats
-        )?;
-        let t_extract = web_time::Instant::now();
-        log(&format!(
-            "[liteparse] extract: {:.1}ms ({} pages)",
-            t_extract.duration_since(t0).as_secs_f64() * 1000.0,
-            pages.len()
-        ));
+            let (pages, _) = extract::extract_pages_and_images(
+                &document,
+                target_pages.as_deref(),
+                self.config.max_pages,
+                false, // render_images: image rasters not needed for complexity
+                false, // extract_links: irrelevant for complexity stats
+                self.glyph_resolver.as_deref(),
+                false, // emit_word_boxes: word boxes not needed for complexity stats
+            )?;
+            let t_extract = web_time::Instant::now();
+            log(&format!(
+                "[liteparse] extract: {:.1}ms ({} pages)",
+                t_extract.duration_since(t0).as_secs_f64() * 1000.0,
+                pages.len()
+            ));
 
-        let t_complexity = web_time::Instant::now();
-        let page_complexities = pages
-            .iter()
-            .map(|page| {
-                let page_obj = document.page((page.page_number - 1) as i32)?;
-                ocr_merge::calculate_page_complexity(page, &page_obj)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            let page_complexities = pages
+                .iter()
+                .map(|page| {
+                    let page_obj = document.page((page.page_number - 1) as i32)?;
+                    ocr_merge::calculate_page_complexity(page, &page_obj)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            log(&format!(
+                "[liteparse] complexity: {:.1}ms",
+                web_time::Instant::now()
+                    .duration_since(t_extract)
+                    .as_secs_f64()
+                    * 1000.0
+            ));
+            // `lib` is dropped here, releasing the PDFium lock; the layout
+            // pass below is pure CPU over the already-extracted items.
+            (pages, page_complexities)
+        };
+
+        // Layout signals come from the projected page: the XY-cut region tree
+        // for columns, figure clusters and ruled-table rects for graphics and
+        // tables. Running real projection here (rather than approximating)
+        // keeps the signals identical to what a full parse will decide.
+        let t_layout = web_time::Instant::now();
+        let parsed_pages = projection::project_pages_to_grid(pages);
+        for (stats, page) in page_complexities.iter_mut().zip(&parsed_pages) {
+            stats.layout = Some(ocr_merge::calculate_layout_complexity(page));
+        }
         log(&format!(
-            "[liteparse] complexity: {:.1}ms",
-            t_complexity.duration_since(t_extract).as_secs_f64() * 1000.0
+            "[liteparse] layout: {:.1}ms",
+            web_time::Instant::now()
+                .duration_since(t_layout)
+                .as_secs_f64()
+                * 1000.0
         ));
 
         Ok(page_complexities)
@@ -373,8 +402,10 @@ impl LiteParse {
         // Grid projection
         let mut parsed_pages = projection::project_pages_to_grid(pages);
 
-        // Attach per-page complexity signals
-        for (page, stats) in parsed_pages.iter_mut().zip(complexity) {
+        // Attach per-page complexity signals, including the layout signals
+        // that need the projected page (same as `is_complex()` reports).
+        for (page, mut stats) in parsed_pages.iter_mut().zip(complexity) {
+            stats.layout = Some(ocr_merge::calculate_layout_complexity(page));
             page.complexity = Some(stats);
         }
         let t2 = web_time::Instant::now();

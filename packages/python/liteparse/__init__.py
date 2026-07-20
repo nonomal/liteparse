@@ -3,6 +3,7 @@ from importlib.metadata import PackageNotFoundError, version
 from .parser import LiteParse, search_items
 from .types import (
     ExtractedImage,
+    LayoutComplexityStats,
     LiteParseConfig,
     PageComplexityStats,
     ParseResult,
@@ -26,6 +27,7 @@ __all__ = [
     "WordBox",
     "ScreenshotResult",
     "PageComplexityStats",
+    "LayoutComplexityStats",
     "ExtractedImage",
     "ParseError",
     "search_items",

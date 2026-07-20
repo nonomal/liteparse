@@ -467,6 +467,38 @@ pub struct JsScreenshotResult {
 
 #[napi(object)]
 #[derive(Clone)]
+pub struct JsLayoutComplexityStats {
+    pub column_count: u32,
+    pub ruled_table_count: u32,
+    pub ruled_table_coverage: f64,
+    pub text_table_run_count: u32,
+    pub figure_count: u32,
+    pub figure_coverage: f64,
+    pub is_complex: bool,
+    pub reasons: Vec<String>,
+}
+
+impl JsLayoutComplexityStats {
+    pub fn from_rust(stats: &liteparse::ocr_merge::LayoutComplexityStats) -> Self {
+        Self {
+            column_count: stats.column_count as u32,
+            ruled_table_count: stats.ruled_table_count as u32,
+            ruled_table_coverage: stats.ruled_table_coverage as f64,
+            text_table_run_count: stats.text_table_run_count as u32,
+            figure_count: stats.figure_count as u32,
+            figure_coverage: stats.figure_coverage as f64,
+            is_complex: stats.is_complex,
+            reasons: stats
+                .reasons
+                .iter()
+                .map(|r| r.as_str().to_string())
+                .collect(),
+        }
+    }
+}
+
+#[napi(object)]
+#[derive(Clone)]
 pub struct JsPageComplexityStats {
     pub page_number: u32,
     pub text_length: u32,
@@ -481,6 +513,7 @@ pub struct JsPageComplexityStats {
     pub page_area: f64,
     pub needs_ocr: bool,
     pub reasons: Vec<String>,
+    pub layout: Option<JsLayoutComplexityStats>,
 }
 
 impl JsPageComplexityStats {
@@ -503,6 +536,10 @@ impl JsPageComplexityStats {
                 .iter()
                 .map(|r| r.as_str().to_string())
                 .collect(),
+            layout: stats
+                .layout
+                .as_ref()
+                .map(JsLayoutComplexityStats::from_rust),
         }
     }
 }

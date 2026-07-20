@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::error::LiteParseError;
 use crate::ocr::{OcrEngine, OcrOptions, OcrResult};
-use crate::types::{Page, TextItem};
+use crate::types::{CutAxis, Page, ParsedPage, Region, RegionKind, TextItem};
 use pdfium::{Document, ImageBounds};
 use serde::Serialize;
 
@@ -22,6 +22,20 @@ const MIN_IMAGE_SIZE_PT: f32 = 25.0;
 /// A single image at or above this fraction of the page is treated as a
 /// full-page background and ignored.
 const MAX_IMAGE_PAGE_COVERAGE: f32 = 0.9;
+
+/// An XY-cut subtree must hold at least this many text items to count as a
+/// text column, regardless of page size.
+const MIN_COLUMN_ITEMS: usize = 8;
+
+/// ...and at least this fraction of the page's text items. Together with
+/// `MIN_COLUMN_ITEMS` this keeps thin sidebars, figure captions, and margin
+/// notes from flagging a page as multi-column. First-pass guess pending
+/// calibration against ParseBench's multi_column category.
+const MIN_COLUMN_ITEM_FRACTION: f32 = 0.15;
+
+/// Figure coverage at or above this fraction of the page area flags
+/// `DenseGraphics`. First-pass guess, same calibration caveat as above.
+const DENSE_GRAPHICS_MIN_COVERAGE: f32 = 0.2;
 
 /// Owned page bitmap prepared for OCR. Indices refer to positions in the `pages` slice.
 pub(crate) struct RenderedPage {
@@ -111,6 +125,13 @@ pub struct PageComplexityStats {
     pub needs_ocr: bool,
     /// Every reason the page was flagged, in no particular priority order.
     pub reasons: Vec<ComplexityReason>,
+    /// Layout-difficulty signals (columns, tables, dense graphics), computed
+    /// from the post-projection page. Orthogonal to `needs_ocr`/`reasons`:
+    /// none of these imply OCR. `None` in the internal per-page OCR gate
+    /// (`render_pages_for_ocr`), which never runs projection — only
+    /// `is_complex()` and `include_complexity` parses populate it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<LayoutComplexityStats>,
 }
 
 pub(crate) fn calculate_page_complexity(
@@ -232,7 +253,164 @@ pub(crate) fn calculate_page_complexity(
         page_area,
         needs_ocr,
         reasons,
+        layout: None,
     })
+}
+
+/// Why a page's layout is expected to be hard to reconstruct faithfully.
+/// Orthogonal to `ComplexityReason`: none of these imply OCR — they signal
+/// that the text-only path may mangle reading order or structure, so a caller
+/// can route the page to a higher-accuracy pipeline. Same leniency contract
+/// as `ComplexityReason`: new variants will be added, treat unknowns kindly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LayoutComplexityReason {
+    /// The XY-cut layout tree splits the page into two or more side-by-side
+    /// regions that each hold a substantial share of the text.
+    MultiColumn,
+    /// Table structure detected: ruled-line grid(s) and/or borderless
+    /// column-aligned text runs — the same detectors the markdown emitter
+    /// uses. Description lists (label/value pairs) do not count.
+    TableLikely,
+    /// Figure regions (charts, diagrams, decorated boxes) cover a large
+    /// fraction of the page; their vector content is invisible to text
+    /// extraction.
+    DenseGraphics,
+}
+
+impl LayoutComplexityReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LayoutComplexityReason::MultiColumn => "multi-column",
+            LayoutComplexityReason::TableLikely => "table-likely",
+            LayoutComplexityReason::DenseGraphics => "dense-graphics",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LayoutComplexityStats {
+    /// Side-by-side text columns found by the XY-cut layout pass (1 = single
+    /// column). Only subtrees holding a substantial share of the page's text
+    /// count, so a thin sidebar or caption does not inflate this.
+    pub column_count: usize,
+    /// Validated ruled-table runs on the page: grid components confirmed
+    /// against the projected text, so a boxed callout or a chart's axis
+    /// gridlines don't count (raw grid detection fired on 94% of ParseBench's
+    /// chart docs; validation is what makes this a *table* signal).
+    pub ruled_table_count: usize,
+    /// Combined validated ruled-table area (text extent) over page area,
+    /// clamped to 1.0.
+    pub ruled_table_coverage: f32,
+    /// Borderless table runs found by the emitter's track-alignment detector
+    /// over the projected lines (description lists excluded). Ruled tables can
+    /// appear here too — their text rows also align to tracks — so do not sum
+    /// this with `ruled_table_count`; the two discriminate "ruled" from
+    /// "borderless", they don't partition tables.
+    pub text_table_run_count: usize,
+    /// Figure regions clustered from vector graphics.
+    pub figure_count: usize,
+    /// Combined figure area over page area, clamped to 1.0. Overlapping rects
+    /// can inflate the sum past the truly covered fraction — same caveat as
+    /// `image_coverage`.
+    pub figure_coverage: f32,
+    /// Whether any layout reason fired. Equivalent to `!reasons.is_empty()`,
+    /// kept flat for the common predicate case (mirrors `needs_ocr`).
+    pub is_complex: bool,
+    pub reasons: Vec<LayoutComplexityReason>,
+}
+
+/// Compute layout-difficulty signals from a projected page. Read-only over
+/// structures projection already built: the XY-cut region tree for columns,
+/// `figures` for graphics density, and the emitter's own table detectors —
+/// validated ruled grids and borderless track-aligned runs — over the
+/// projected lines and vector primitives.
+pub(crate) fn calculate_layout_complexity(page: &ParsedPage) -> LayoutComplexityStats {
+    let page_area = page.page_width * page.page_height;
+    let total_items = page.text_items.len();
+
+    let column_count = count_columns(&page.regions, total_items).max(1);
+
+    let table_rects = crate::markdown_layout::validated_ruled_table_rects(
+        &page.projected_lines,
+        &page.graphics,
+        page.page_width,
+        page.page_height,
+    );
+    let text_table_run_count = crate::markdown_layout::count_text_table_runs(&page.projected_lines);
+    let table_area: f32 = table_rects
+        .iter()
+        .map(|r| r.width.max(0.0) * r.height.max(0.0))
+        .sum();
+    let figure_area: f32 = page
+        .figures
+        .iter()
+        .map(|r| r.width.max(0.0) * r.height.max(0.0))
+        .sum();
+    // The `area > 0.0` guard also normalizes the `-0.0` an empty `f32` sum
+    // yields, which would otherwise serialize as `-0.0` in JSON.
+    let coverage = |area: f32| {
+        if page_area > 0.0 && area > 0.0 {
+            (area / page_area).min(1.0)
+        } else {
+            0.0
+        }
+    };
+    let ruled_table_coverage = coverage(table_area);
+    let figure_coverage = coverage(figure_area);
+
+    let mut reasons = Vec::new();
+    if column_count >= 2 {
+        reasons.push(LayoutComplexityReason::MultiColumn);
+    }
+    if !table_rects.is_empty() || text_table_run_count > 0 {
+        reasons.push(LayoutComplexityReason::TableLikely);
+    }
+    if figure_coverage >= DENSE_GRAPHICS_MIN_COVERAGE {
+        reasons.push(LayoutComplexityReason::DenseGraphics);
+    }
+
+    LayoutComplexityStats {
+        column_count,
+        ruled_table_count: table_rects.len(),
+        ruled_table_coverage,
+        text_table_run_count,
+        figure_count: page.figures.len(),
+        figure_coverage,
+        is_complex: !reasons.is_empty(),
+        reasons,
+    }
+}
+
+fn region_item_count(region: &Region) -> usize {
+    match &region.kind {
+        RegionKind::Leaf { item_indices } => item_indices.len(),
+        RegionKind::Split { children, .. } => children.iter().map(region_item_count).sum(),
+    }
+}
+
+/// Count side-by-side text columns in an XY-cut subtree. Subtrees below the
+/// substantiality bar contribute zero. Vertical splits sum their children
+/// (side-by-side regions), horizontal splits take the max of theirs (stacked
+/// bands — a full-width title above a two-column body is a two-column page).
+/// Nested vertical splits therefore count correctly: a three-column page cut
+/// as `V(a, V(b, c))` yields 3.
+fn count_columns(region: &Region, total_items: usize) -> usize {
+    let min_items =
+        MIN_COLUMN_ITEMS.max((total_items as f32 * MIN_COLUMN_ITEM_FRACTION).ceil() as usize);
+    if region_item_count(region) < min_items {
+        return 0;
+    }
+    match &region.kind {
+        RegionKind::Leaf { .. } => 1,
+        RegionKind::Split { axis, children } => {
+            let counts = children.iter().map(|c| count_columns(c, total_items));
+            match axis {
+                CutAxis::Vertical => counts.sum(),
+                CutAxis::Horizontal => counts.max().unwrap_or(0),
+            }
+        }
+    }
 }
 
 /// Render pages that need OCR from an already-open document.
@@ -734,6 +912,75 @@ fn clean_ocr_table_artifacts(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::Rect;
+
+    fn leaf(n: usize) -> Region {
+        Region {
+            bbox: Rect::default(),
+            kind: RegionKind::Leaf {
+                item_indices: (0..n).collect(),
+            },
+        }
+    }
+
+    fn split(axis: CutAxis, children: Vec<Region>) -> Region {
+        Region {
+            bbox: Rect::default(),
+            kind: RegionKind::Split { axis, children },
+        }
+    }
+
+    #[test]
+    fn test_count_columns_single_leaf() {
+        assert_eq!(count_columns(&leaf(50), 50), 1);
+    }
+
+    #[test]
+    fn test_count_columns_two_columns() {
+        let root = split(CutAxis::Vertical, vec![leaf(40), leaf(40)]);
+        assert_eq!(count_columns(&root, 80), 2);
+    }
+
+    #[test]
+    fn test_count_columns_nested_three_columns() {
+        // Three-column page cut as V(a, V(b, c)).
+        let inner = split(CutAxis::Vertical, vec![leaf(30), leaf(30)]);
+        let root = split(CutAxis::Vertical, vec![leaf(40), inner]);
+        assert_eq!(count_columns(&root, 100), 3);
+    }
+
+    #[test]
+    fn test_count_columns_header_over_two_columns() {
+        // Full-width title band stacked above a two-column body: the page is
+        // still two-column (horizontal splits take the max of their bands).
+        let body = split(CutAxis::Vertical, vec![leaf(40), leaf(40)]);
+        let root = split(CutAxis::Horizontal, vec![leaf(20), body]);
+        assert_eq!(count_columns(&root, 100), 2);
+    }
+
+    #[test]
+    fn test_count_columns_thin_sidebar_not_a_column() {
+        // A 6-item sidebar next to a 94-item body fails both the absolute
+        // (8-item) and fractional (15%) bars.
+        let root = split(CutAxis::Vertical, vec![leaf(6), leaf(94)]);
+        assert_eq!(count_columns(&root, 100), 1);
+    }
+
+    #[test]
+    fn test_count_columns_narrow_table_slices_not_columns() {
+        // Four narrow slices (10 items each of 100): each fails the 15%
+        // fractional bar, so none count — table-ish V-splits stay quiet.
+        let root = split(
+            CutAxis::Vertical,
+            vec![leaf(10), leaf(10), leaf(10), leaf(10)],
+        );
+        assert_eq!(count_columns(&root, 100), 0);
+    }
+
+    #[test]
+    fn test_count_columns_empty_page() {
+        assert_eq!(count_columns(&leaf(0), 0), 0);
+    }
 
     #[test]
     fn test_polygon_rotation_horizontal() {

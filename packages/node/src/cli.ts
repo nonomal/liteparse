@@ -91,6 +91,10 @@ program
     "--complexity",
     "Include per-page complexity signals in JSON output",
   )
+  .option(
+    "--extract-vector-graphics",
+    "Include page-scoped vector shapes and merged horizontal/vertical lines",
+  )
   .action(async (file: string, opts: Record<string, unknown>) => {
     try {
       const config: Partial<LiteParseConfig> = {};
@@ -126,6 +130,7 @@ program
       if (opts.quiet) config.quiet = true;
       if (opts.numWorkers) config.numWorkers = opts.numWorkers as number;
       if (opts.complexity) config.includeComplexity = true;
+      if (opts.extractVectorGraphics) config.extractVectorGraphics = true;
 
       // Default CLI output to text (library defaults to json)
       if (!config.outputFormat) config.outputFormat = "text";
@@ -143,6 +148,7 @@ program
                   height: p.height,
                   text: p.text,
                   textItems: p.textItems,
+                  ...(p.vectorGraphics ? { vectorGraphics: p.vectorGraphics } : {}),
                 })),
                 images: result.images.map(({ bytes: _bytes, ...image }) => image),
                 imageErrorCount: result.imageErrorCount,
@@ -317,6 +323,10 @@ program
     "Include rich PDF text metadata in text items and JSON output",
   )
   .option("--extract-images", "Extract embedded image bytes and metadata")
+  .option(
+    "--extract-vector-graphics",
+    "Include page-scoped vector shapes and merged horizontal/vertical lines",
+  )
   .action(
     async (
       inputDir: string,
@@ -340,6 +350,7 @@ program
         if (opts.numWorkers) config.numWorkers = opts.numWorkers as number;
         if (opts.includeTextMetadata) config.includeTextMetadata = true;
         if (opts.extractImages) config.extractImages = true;
+        if (opts.extractVectorGraphics) config.extractVectorGraphics = true;
 
         const parser = new LiteParse(config);
         const outExt = format === "json" ? ".json" : format === "markdown" ? ".md" : ".txt";
@@ -396,6 +407,7 @@ program
                         height: p.height,
                         text: p.text,
                         textItems: p.textItems,
+                        ...(p.vectorGraphics ? { vectorGraphics: p.vectorGraphics } : {}),
                       })),
                       images: result.images.map(({ bytes: _bytes, ...image }) => image),
                       imageErrorCount: result.imageErrorCount,

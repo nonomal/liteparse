@@ -131,6 +131,9 @@ struct ParseCommand {
     /// Include rich PDF text metadata in text items and JSON output.
     #[arg(long)]
     include_text_metadata: bool,
+    /// Include page-scoped vector shapes and merged horizontal/vertical lines.
+    #[arg(long)]
+    extract_vector_graphics: bool,
 }
 
 #[derive(Args, Debug)]
@@ -230,6 +233,9 @@ struct BatchParseCommand {
     /// Extract embedded image bytes and metadata.
     #[arg(long)]
     extract_images: bool,
+    /// Include page-scoped vector shapes and merged horizontal/vertical lines.
+    #[arg(long)]
+    extract_vector_graphics: bool,
 }
 
 #[derive(Args, Debug)]
@@ -351,6 +357,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 extract_links: !cmd.no_links,
                 include_complexity: cmd.complexity,
                 include_text_metadata: cmd.include_text_metadata,
+                extract_vector_graphics: cmd.extract_vector_graphics,
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {
@@ -447,6 +454,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 include_complexity: cmd.complexity,
                 include_text_metadata: cmd.include_text_metadata,
                 extract_images: cmd.extract_images,
+                extract_vector_graphics: cmd.extract_vector_graphics,
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {

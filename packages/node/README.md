@@ -61,6 +61,7 @@ const parser = new LiteParse({
   extractImages: true,           // Extract image bytes + metadata (default: false)
   imageOutputDir: './images',    // Write images and return name/path metadata (optional)
   extractLinks: true,            // Render [text](url) links in markdown output
+  extractVectorGraphics: false,  // Opt-in shapes + merged H/V lines per page
   preserveVerySmallText: false,  // Keep tiny text
   includeTextMetadata: false,    // Opt in to MCID, font metrics, colors, char codes, and tsg
   password: undefined,           // Password for protected documents

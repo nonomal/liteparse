@@ -80,10 +80,12 @@ struct ParseCommand {
     /// page of JSON output. Off by default.
     #[arg(long)]
     complexity: bool,
-
     /// Include rich PDF text metadata in text items and JSON output.
     #[arg(long)]
     include_text_metadata: bool,
+    /// Include page-scoped vector shapes and merged horizontal/vertical lines.
+    #[arg(long)]
+    extract_vector_graphics: bool,
 }
 
 #[derive(Args, Debug)]
@@ -155,12 +157,14 @@ struct BatchParseCommand {
     /// page of JSON output. Off by default.
     #[arg(long)]
     complexity: bool,
-
     /// Include rich PDF text metadata in text items and JSON output.
     #[arg(long)]
     include_text_metadata: bool,
     #[arg(long)]
     extract_images: bool,
+    /// Include page-scoped vector shapes and merged horizontal/vertical lines.
+    #[arg(long)]
+    extract_vector_graphics: bool,
 }
 
 /// Parse a `Name: Value` header string into a `(name, value)` pair.
@@ -242,6 +246,7 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 extract_links: !cmd.no_links,
                 include_complexity: cmd.complexity,
                 include_text_metadata: cmd.include_text_metadata,
+                extract_vector_graphics: cmd.extract_vector_graphics,
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {
@@ -333,6 +338,7 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 include_complexity: cmd.complexity,
                 include_text_metadata: cmd.include_text_metadata,
                 extract_images: cmd.extract_images,
+                extract_vector_graphics: cmd.extract_vector_graphics,
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {

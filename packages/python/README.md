@@ -60,6 +60,7 @@ parser = LiteParse(
     extract_images=True,            # Extract image bytes + metadata (default: False)
     image_output_dir="./images",   # Write images and return name/path metadata (optional)
     extract_links=True,            # Render [text](url) links in markdown output
+    extract_vector_graphics=False, # Opt-in shapes + merged H/V lines per page
     preserve_very_small_text=False, # Keep tiny text
     include_text_metadata=False,    # Opt in to MCID, font metrics, colors, char codes, and tsg
     password=None,                 # Password for protected documents

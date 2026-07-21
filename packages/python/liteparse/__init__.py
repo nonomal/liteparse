@@ -13,6 +13,9 @@ from .types import (
     WordBox,
     ScreenshotResult,
     ParseError,
+    VectorGraphics,
+    VectorLine,
+    VectorShape,
 )
 
 try:
@@ -33,4 +36,7 @@ __all__ = [
     "ImageRect",
     "ParseError",
     "search_items",
+    "VectorGraphics",
+    "VectorLine",
+    "VectorShape",
 ]

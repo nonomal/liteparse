@@ -84,6 +84,8 @@ export interface LiteParseConfig {
    * extra vector-text detection pass.
    */
   includeComplexity: boolean;
+  /** Expose page-scoped vector shapes and merged H/V line segments. Default false. */
+  extractVectorGraphics: boolean;
 }
 
 /**
@@ -198,6 +200,31 @@ export interface ParsedPage {
    * otherwise.
    */
   complexity?: PageComplexityStats;
+  /** Present only when parsing with `extractVectorGraphics: true`. */
+  vectorGraphics?: VectorGraphics;
+}
+
+export interface VectorGraphics {
+  shapes: VectorShape[];
+  lines: VectorLine[];
+}
+
+export interface VectorShape {
+  bbox: { x: number; y: number; width: number; height: number };
+  stroke: boolean;
+  strokeColor?: string;
+  fill: boolean;
+  fillColor?: string;
+  hasCurve: boolean;
+}
+
+export interface VectorLine {
+  x1: number; y1: number; x2: number; y2: number;
+  stroke: boolean;
+  strokeWidth?: number;
+  strokeColor?: string;
+  fill: boolean;
+  fillColor?: string;
 }
 
 export interface ExtractedImage {
@@ -347,6 +374,7 @@ export class LiteParse {
       cropBox: userConfig.cropBox,
       skipDiagonalText: userConfig.skipDiagonalText,
       includeComplexity: userConfig.includeComplexity,
+      extractVectorGraphics: userConfig.extractVectorGraphics,
     };
 
     this._native = new native.LiteParse(nativeConfig);
@@ -378,6 +406,7 @@ export class LiteParse {
       cropBox: resolved.cropBox ?? undefined,
       skipDiagonalText: resolved.skipDiagonalText ?? false,
       includeComplexity: resolved.includeComplexity ?? false,
+      extractVectorGraphics: resolved.extractVectorGraphics ?? false,
     };
   }
 
@@ -492,6 +521,7 @@ function toPage(p: NativeParsedPage): ParsedPage {
     markdown: p.markdown,
     textItems: p.textItems.map(toTextItem),
     complexity: p.complexity ? toComplexity(p.complexity) : undefined,
+    vectorGraphics: p.vectorGraphics ?? undefined,
   };
 }
 

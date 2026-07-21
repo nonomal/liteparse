@@ -58,7 +58,7 @@ flowchart LR
 
       subgraph Core["Rust Core"]
           direction TB
-          CONV["Format Conversion\nLibreOffice / ImageMagick"]
+          CONV["Format Conversion\nLibreOffice / Rust image + resvg + usvg crates"]
           EXTRACT["Text Extraction\nPDFium C library"]
           OCR["Selective OCR\nTesseract / HTTP / Custom"]
           MERGE["OCR Merge\nNative text + OCR results"]
@@ -386,21 +386,13 @@ choco install libreoffice-fresh
 
 > _On Windows, you may need to add LibreOffice's program directory (usually `C:\Program Files\LibreOffice\program`) to your PATH._
 
-#### Images (via ImageMagick)
+#### Images (native support)
 - **Formats**: `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.tiff`, `.webp`, `.svg`
 
-Install ImageMagick for image-to-PDF conversion:
-
-```bash
-# macOS
-brew install imagemagick
-
-# Ubuntu/Debian
-apt-get install imagemagick
-
-# Windows
-choco install imagemagick.app
-```
+> ![NOTE]
+>
+> As of [v2.8.0](https://github.com/run-llama/liteparse/releases/tag/crates-v2.8.0), `imagemagick` is no longer required to convert images to PDF. Conversion is natively
+> handled by the rust code.
 
 ## Environment Variables
 

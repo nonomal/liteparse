@@ -222,7 +222,7 @@ not inherit the OAR model or runtime dependency footprint.
 - PDF (`.pdf`)
 - Microsoft Office (`.docx`, `.xlsx`, `.pptx`, etc.) — requires LibreOffice
 - OpenDocument (`.odt`, `.ods`, `.odp`) — requires LibreOffice
-- Images (`.png`, `.jpg`, `.tiff`, etc.) — requires ImageMagick
+- Images (`.png`, `.jpg`, `.tiff`, etc.)
 
 ## CLI
 

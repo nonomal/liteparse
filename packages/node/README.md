@@ -123,7 +123,7 @@ for (const page of pages.filter((p) => p.needsOcr)) {
 - PDF (`.pdf`)
 - Microsoft Office (`.docx`, `.xlsx`, `.pptx`, etc.) — requires LibreOffice
 - OpenDocument (`.odt`, `.ods`, `.odp`) — requires LibreOffice
-- Images (`.png`, `.jpg`, `.tiff`, etc.) — requires ImageMagick
+- Images (`.png`, `.jpg`, `.tiff`, etc.)
 - And more!
 
 ## CLI

@@ -7,6 +7,8 @@ from liteparse._liteparse import LiteParse as _NativeLiteParse
 from liteparse._liteparse import search_items as _native_search_items
 
 from .types import (
+    AnnotationRect,
+    DocumentAnnotation,
     ExtractedImage,
     ImageRect,
     LayoutComplexityStats,
@@ -98,6 +100,7 @@ def _convert_native_result(native_result: Any) -> ParseResult:
         ]
         native_complexity = getattr(native_page, "complexity", None)
         native_vectors = getattr(native_page, "vector_graphics", None)
+        native_annotations = getattr(native_page, "annotations", None)
         pages.append(
             ParsedPage(
                 page_num=native_page.page_num,
@@ -140,6 +143,40 @@ def _convert_native_result(native_result: Any) -> ParseResult:
                         ],
                     )
                     if native_vectors is not None
+                    else None
+                ),
+                annotations=(
+                    [
+                        DocumentAnnotation(
+                            subtype=annotation.subtype,
+                            contents=annotation.contents,
+                            created=annotation.created,
+                            modified=annotation.modified,
+                            title=annotation.title,
+                            rect=(
+                                AnnotationRect(
+                                    x=annotation.rect.x,
+                                    y=annotation.rect.y,
+                                    width=annotation.rect.width,
+                                    height=annotation.rect.height,
+                                )
+                                if annotation.rect is not None
+                                else None
+                            ),
+                            quadpoint_rects=[
+                                AnnotationRect(
+                                    x=rect.x,
+                                    y=rect.y,
+                                    width=rect.width,
+                                    height=rect.height,
+                                )
+                                for rect in annotation.quadpoint_rects
+                            ],
+                            uri=annotation.uri,
+                        )
+                        for annotation in native_annotations
+                    ]
+                    if native_annotations is not None
                     else None
                 ),
             )
@@ -206,6 +243,7 @@ class LiteParse:
         extract_images: Optional[bool] = None,
         image_output_dir: Optional[Union[str, Path]] = None,
         extract_links: Optional[bool] = None,
+        extract_annotations: Optional[bool] = None,
         ocr_failure_fatal: Optional[bool] = None,
         ocr_hedge_delays_ms: Optional[List[int]] = None,
         emit_word_boxes: Optional[bool] = None,
@@ -241,6 +279,8 @@ class LiteParse:
             extract_images: Extract embedded image bytes and metadata. Defaults
                 to False; ``image_mode="embed"`` and ``image_output_dir`` also
                 imply extraction for compatibility.
+            extract_annotations: Include all PDF annotations as page-scoped
+                structured data (default: False).
             ocr_failure_fatal: Whether a systemic OCR failure (every OCR task
                 failed and at least one was a text-sparse page) aborts the whole
                 parse (default: True). Set False to keep already-recovered native
@@ -311,6 +351,8 @@ class LiteParse:
             kwargs["image_output_dir"] = str(image_output_dir)
         if extract_links is not None:
             kwargs["extract_links"] = extract_links
+        if extract_annotations is not None:
+            kwargs["extract_annotations"] = extract_annotations
         if ocr_failure_fatal is not None:
             kwargs["ocr_failure_fatal"] = ocr_failure_fatal
         if ocr_hedge_delays_ms is not None:
@@ -462,6 +504,7 @@ class LiteParse:
             image_mode=cfg.image_mode,
             image_output_dir=cfg.image_output_dir,
             extract_links=cfg.extract_links,
+            extract_annotations=cfg.extract_annotations,
             ocr_failure_fatal=cfg.ocr_failure_fatal,
             ocr_hedge_delays_ms=list(cfg.ocr_hedge_delays_ms),
             emit_word_boxes=cfg.emit_word_boxes,

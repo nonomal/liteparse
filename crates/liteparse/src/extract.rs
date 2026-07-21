@@ -1,8 +1,9 @@
 use crate::error::LiteParseError;
 use crate::glyph_names::resolve_glyph_name;
 use crate::types::{
-    ExtractedImage, GraphicPrimitive, ImageRef, OutlineTarget, Page as LitePage, PdfInput, Rect,
-    StructNode, TextItem, VectorGraphics, VectorLine, VectorShape, WordBox,
+    DocumentAnnotation, ExtractedImage, GraphicPrimitive, ImageRef, OutlineTarget,
+    Page as LitePage, PdfInput, Rect, StructNode, TextItem, VectorGraphics, VectorLine,
+    VectorShape, WordBox,
 };
 use image::ImageEncoder;
 use pdfium::{
@@ -122,6 +123,25 @@ pub(crate) fn extract_pages_and_images(
         let extracted_refs = extract_page_image_refs(&page, page_number, render_images);
         let mut image_refs = extracted_refs.refs;
         image_error_count += extracted_refs.error_count;
+        let annotations = output_options.extract_annotations.then(|| {
+            page.annotations(&view_box)
+                .into_iter()
+                .map(|annotation| DocumentAnnotation {
+                    subtype: annotation.subtype,
+                    contents: annotation.contents,
+                    created: annotation.created,
+                    modified: annotation.modified,
+                    title: annotation.title,
+                    rect: annotation.rect.map(rect_from_pdfium),
+                    quadpoint_rects: annotation
+                        .quadpoint_rects
+                        .into_iter()
+                        .map(rect_from_pdfium)
+                        .collect(),
+                    uri: annotation.uri,
+                })
+                .collect()
+        });
 
         if render_images && !image_refs.is_empty() {
             let rendered = render_page_images(&page, page_number, &image_refs, &mut image_cache);
@@ -142,6 +162,7 @@ pub(crate) fn extract_pages_and_images(
             vector_graphics,
             struct_nodes,
             image_refs,
+            annotations,
         });
     }
 
@@ -152,6 +173,16 @@ pub(crate) fn extract_pages_and_images(
 pub(crate) struct ExtractionOutputOptions {
     pub emit_word_boxes: bool,
     pub extract_vector_graphics: bool,
+    pub extract_annotations: bool,
+}
+
+fn rect_from_pdfium(rect: RectF) -> Rect {
+    Rect {
+        x: rect.left,
+        y: rect.top,
+        width: rect.right - rect.left,
+        height: rect.bottom - rect.top,
+    }
 }
 
 /// Assign hyperlink URIs to text items whose bbox center falls inside a link
@@ -2464,6 +2495,7 @@ mod tests {
             vector_graphics: None,
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
+            annotations: None,
         }
     }
 

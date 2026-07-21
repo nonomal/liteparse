@@ -123,6 +123,10 @@ struct ParseCommand {
     #[arg(long)]
     no_links: bool,
 
+    /// Include all PDF annotations as page-scoped structured JSON/API data.
+    #[arg(long)]
+    extract_annotations: bool,
+
     /// Include per-page complexity signals (the same `is-complex` reports) as a
     /// `complexity` object on each page of JSON output. Off by default; enabling
     /// it runs the extra vector-text detection pass.
@@ -236,6 +240,10 @@ struct BatchParseCommand {
     /// Include page-scoped vector shapes and merged horizontal/vertical lines.
     #[arg(long)]
     extract_vector_graphics: bool,
+
+    /// Include all PDF annotations as page-scoped structured JSON/API data.
+    #[arg(long)]
+    extract_annotations: bool,
 }
 
 #[derive(Args, Debug)]
@@ -355,6 +363,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 extract_images: cmd.extract_images,
                 image_output_dir: cmd.image_output_dir.clone(),
                 extract_links: !cmd.no_links,
+                extract_annotations: cmd.extract_annotations,
                 include_complexity: cmd.complexity,
                 include_text_metadata: cmd.include_text_metadata,
                 extract_vector_graphics: cmd.extract_vector_graphics,
@@ -455,6 +464,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 include_text_metadata: cmd.include_text_metadata,
                 extract_images: cmd.extract_images,
                 extract_vector_graphics: cmd.extract_vector_graphics,
+                extract_annotations: cmd.extract_annotations,
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {

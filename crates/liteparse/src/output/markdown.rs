@@ -160,6 +160,7 @@ mod tests {
             struct_nodes: vec![],
             image_refs: vec![],
             complexity: None,
+            annotations: None,
         }
     }
 
@@ -210,6 +211,7 @@ mod tests {
             struct_nodes: vec![],
             image_refs: vec![],
             complexity: None,
+            annotations: None,
         };
         let out = format_markdown(&[p], &[], ImageMode::Placeholder);
         assert!(out.contains("```text"));

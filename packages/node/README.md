@@ -62,6 +62,7 @@ const parser = new LiteParse({
   imageOutputDir: './images',    // Write images and return name/path metadata (optional)
   extractLinks: true,            // Render [text](url) links in markdown output
   extractVectorGraphics: false,  // Opt-in shapes + merged H/V lines per page
+  extractAnnotations: false,     // Include page annotations in structured output
   preserveVerySmallText: false,  // Keep tiny text
   includeTextMetadata: false,    // Opt in to MCID, font metrics, colors, char codes, and tsg
   password: undefined,           // Password for protected documents
@@ -77,6 +78,12 @@ one file, and JSON CLI output contains metadata only—never base64 image data.
 `imageMode: "embed"` also continues to imply extraction. With the defaults
 (`imageMode: "placeholder"`, `extractImages: false`), only lightweight Markdown
 placement refs are collected and `result.images` stays empty.
+
+When `extractAnnotations` is enabled, each parsed page has an `annotations`
+array containing the subtype, contents, author/title, PDF date strings,
+viewport-space rectangle and quadpoint rectangles, and URI for external link
+annotations. It is independent of `extractLinks`, which controls Markdown link
+rendering. The field is omitted when extraction is disabled.
 
 ## Parsing from Bytes
 
@@ -145,6 +152,7 @@ The npm package includes the `lit` CLI:
 ```bash
 lit parse document.pdf
 lit parse document.pdf --format json -o output.json
+lit parse document.pdf --format json --extract-annotations
 lit screenshot document.pdf -o ./screenshots
 lit batch-parse ./input ./output
 lit is-complex document.pdf

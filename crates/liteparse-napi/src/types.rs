@@ -5,7 +5,7 @@ use napi_derive::napi;
 use liteparse::config::{CropBox, ImageMode, LiteParseConfig, OutputFormat};
 use liteparse::parser::ParseResult;
 use liteparse::types::{
-    GraphicPrimitive, Page, ParsedPage, Rect, TextItem, VectorGraphics, WordBox,
+    DocumentAnnotation, GraphicPrimitive, Page, ParsedPage, Rect, TextItem, VectorGraphics, WordBox,
 };
 
 // ---------------------------------------------------------------------------
@@ -54,6 +54,8 @@ pub struct JsLiteParseConfig {
     /// Render hyperlink annotations as `[text](url)` in markdown output
     /// (default true). Set false for plain anchor text.
     pub extract_links: Option<bool>,
+    /// Extract all PDF annotations as page-scoped structured data.
+    pub extract_annotations: Option<bool>,
     /// Whether a systemic OCR failure aborts the whole parse (default true).
     /// Set false to keep already-recovered native text and return partial
     /// results when OCR is unavailable, instead of rejecting.
@@ -156,6 +158,9 @@ impl JsLiteParseConfig {
         if let Some(v) = self.extract_links {
             cfg.extract_links = v;
         }
+        if let Some(v) = self.extract_annotations {
+            cfg.extract_annotations = v;
+        }
         if let Some(v) = self.ocr_failure_fatal {
             cfg.ocr_failure_fatal = v;
         }
@@ -219,6 +224,7 @@ impl JsLiteParseConfig {
             extract_images: Some(cfg.extract_images),
             image_output_dir: cfg.image_output_dir.clone(),
             extract_links: Some(cfg.extract_links),
+            extract_annotations: Some(cfg.extract_annotations),
             ocr_failure_fatal: Some(cfg.ocr_failure_fatal),
             ocr_hedge_delays_ms: Some(
                 cfg.ocr_hedge_delays_ms
@@ -477,6 +483,7 @@ impl JsPageInput {
             vector_graphics: None,
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
+            annotations: None,
         }
     }
 }
@@ -496,6 +503,7 @@ pub struct JsParsedPage {
     pub text_items: Vec<JsTextItem>,
     pub complexity: Option<JsPageComplexityStats>,
     pub vector_graphics: Option<JsVectorGraphics>,
+    pub annotations: Option<Vec<JsDocumentAnnotation>>,
 }
 
 #[napi(object)]
@@ -512,6 +520,15 @@ pub struct JsVectorShape {
 #[napi(object)]
 #[derive(Clone)]
 pub struct JsRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+#[napi(object)]
+#[derive(Clone)]
+pub struct JsAnnotationRect {
     pub x: f64,
     pub y: f64,
     pub width: f64,
@@ -578,6 +595,49 @@ impl JsVectorGraphics {
     }
 }
 
+impl JsAnnotationRect {
+    fn from_rust(rect: &Rect) -> Self {
+        Self {
+            x: rect.x as f64,
+            y: rect.y as f64,
+            width: rect.width as f64,
+            height: rect.height as f64,
+        }
+    }
+}
+
+#[napi(object)]
+#[derive(Clone)]
+pub struct JsDocumentAnnotation {
+    pub subtype: String,
+    pub contents: Option<String>,
+    pub created: Option<String>,
+    pub modified: Option<String>,
+    pub title: Option<String>,
+    pub rect: Option<JsAnnotationRect>,
+    pub quadpoint_rects: Vec<JsAnnotationRect>,
+    pub uri: Option<String>,
+}
+
+impl JsDocumentAnnotation {
+    fn from_rust(annotation: &DocumentAnnotation) -> Self {
+        Self {
+            subtype: annotation.subtype.clone(),
+            contents: annotation.contents.clone(),
+            created: annotation.created.clone(),
+            modified: annotation.modified.clone(),
+            title: annotation.title.clone(),
+            rect: annotation.rect.as_ref().map(JsAnnotationRect::from_rust),
+            quadpoint_rects: annotation
+                .quadpoint_rects
+                .iter()
+                .map(JsAnnotationRect::from_rust)
+                .collect(),
+            uri: annotation.uri.clone(),
+        }
+    }
+}
+
 impl JsParsedPage {
     pub fn from_rust(page: &ParsedPage, include_text_metadata: bool) -> Self {
         Self {
@@ -599,6 +659,12 @@ impl JsParsedPage {
                 .vector_graphics
                 .as_ref()
                 .map(JsVectorGraphics::from_rust),
+            annotations: page.annotations.as_ref().map(|annotations| {
+                annotations
+                    .iter()
+                    .map(JsDocumentAnnotation::from_rust)
+                    .collect()
+            }),
         }
     }
 }

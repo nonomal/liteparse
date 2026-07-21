@@ -56,6 +56,7 @@ pub struct LiteParseConfig {
     image_mode: Option<String>,
     extract_images: Option<bool>,
     extract_links: Option<bool>,
+    extract_annotations: Option<bool>,
     ocr_failure_fatal: Option<bool>,
     ocr_hedge_delays_ms: Option<Vec<u64>>,
     preserve_very_small_text: Option<bool>,
@@ -142,6 +143,9 @@ impl LiteParseConfig {
         if let Some(v) = self.extract_links {
             cfg.extract_links = v;
         }
+        if let Some(v) = self.extract_annotations {
+            cfg.extract_annotations = v;
+        }
         if let Some(v) = self.ocr_failure_fatal {
             cfg.ocr_failure_fatal = v;
         }
@@ -207,6 +211,7 @@ impl LiteParseConfig {
             }),
             extract_images: Some(cfg.extract_images),
             extract_links: Some(cfg.extract_links),
+            extract_annotations: Some(cfg.extract_annotations),
             ocr_failure_fatal: Some(cfg.ocr_failure_fatal),
             ocr_hedge_delays_ms: Some(cfg.ocr_hedge_delays_ms.clone()),
             preserve_very_small_text: Some(cfg.preserve_very_small_text),
@@ -278,6 +283,8 @@ pub struct ParsedPage {
     pub complexity: Option<PageComplexityStats>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vector_graphics: Option<VectorGraphics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<Vec<DocumentAnnotation>>,
 }
 
 #[derive(Serialize, Tsify)]
@@ -313,6 +320,16 @@ pub struct VectorRect {
 #[derive(Serialize, Tsify)]
 #[tsify(into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
+pub struct AnnotationRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Serialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
 pub struct VectorLine {
     pub x1: f32,
     pub y1: f32,
@@ -323,6 +340,47 @@ pub struct VectorLine {
     pub stroke_color: Option<String>,
     pub fill: bool,
     pub fill_color: Option<String>,
+}
+
+#[derive(Serialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentAnnotation {
+    pub subtype: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contents: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rect: Option<AnnotationRect>,
+    pub quadpoint_rects: Vec<AnnotationRect>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+}
+
+impl DocumentAnnotation {
+    fn from_rust(annotation: &liteparse::types::DocumentAnnotation) -> Self {
+        let to_rect = |rect: &liteparse::types::Rect| AnnotationRect {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        };
+        Self {
+            subtype: annotation.subtype.clone(),
+            contents: annotation.contents.clone(),
+            created: annotation.created.clone(),
+            modified: annotation.modified.clone(),
+            title: annotation.title.clone(),
+            rect: annotation.rect.as_ref().map(to_rect),
+            quadpoint_rects: annotation.quadpoint_rects.iter().map(to_rect).collect(),
+            uri: annotation.uri.clone(),
+        }
+    }
 }
 
 #[derive(Serialize, Tsify)]
@@ -612,6 +670,12 @@ impl LiteParse {
                             fill_color: l.fill_color.clone(),
                         })
                         .collect(),
+                }),
+                annotations: p.annotations.as_ref().map(|annotations| {
+                    annotations
+                        .iter()
+                        .map(DocumentAnnotation::from_rust)
+                        .collect()
                 }),
             })
             .collect();

@@ -364,6 +364,7 @@ impl LiteParse {
                 extract::ExtractionOutputOptions {
                     emit_word_boxes: self.config.emit_word_boxes,
                     extract_vector_graphics: self.config.extract_vector_graphics,
+                    extract_annotations: self.config.extract_annotations,
                 },
             )?;
             let t_extract = web_time::Instant::now();

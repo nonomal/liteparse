@@ -64,6 +64,7 @@ program
   )
   .option("--extract-images", "Extract embedded image bytes and metadata")
   .option("--no-links", "Disable hyperlink extraction (emit plain anchor text)")
+  .option("--extract-annotations", "Include all PDF annotations in page output")
   .option("--ocr-server-url <url>", "HTTP OCR server URL")
   .option(
     "--ocr-server-header <header>",
@@ -115,6 +116,7 @@ program
         config.imageOutputDir = opts.imageOutputDir as string;
       if (opts.extractImages) config.extractImages = true;
       if (opts.links === false) config.extractLinks = false;
+      if (opts.extractAnnotations) config.extractAnnotations = true;
       if (opts.ocrServerUrl)
         config.ocrServerUrl = opts.ocrServerUrl as string;
       if (opts.ocrServerHeader)
@@ -149,6 +151,7 @@ program
                   text: p.text,
                   textItems: p.textItems,
                   ...(p.vectorGraphics ? { vectorGraphics: p.vectorGraphics } : {}),
+                  ...(p.annotations ? { annotations: p.annotations } : {}),
                 })),
                 images: result.images.map(({ bytes: _bytes, ...image }) => image),
                 imageErrorCount: result.imageErrorCount,

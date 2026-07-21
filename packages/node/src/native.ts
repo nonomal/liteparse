@@ -33,6 +33,7 @@ export interface LiteParseNativeConfig {
   extractImages?: boolean;
   imageOutputDir?: string;
   extractLinks?: boolean;
+  extractAnnotations?: boolean;
   preserveVerySmallText?: boolean;
   password?: string;
   quiet?: boolean;
@@ -120,6 +121,7 @@ export interface NativeParsedPage {
   textItems: NativeTextItem[];
   complexity?: NativePageComplexityStats;
   vectorGraphics?: NativeVectorGraphics;
+  annotations?: NativeDocumentAnnotation[];
 }
 
 export interface NativeVectorGraphics {
@@ -136,6 +138,24 @@ export interface NativeVectorGraphics {
     stroke: boolean; strokeWidth?: number; strokeColor?: string;
     fill: boolean; fillColor?: string;
   }>;
+}
+
+export interface NativeAnnotationRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface NativeDocumentAnnotation {
+  subtype: string;
+  contents?: string;
+  created?: string;
+  modified?: string;
+  title?: string;
+  rect?: NativeAnnotationRect;
+  quadpointRects: NativeAnnotationRect[];
+  uri?: string;
 }
 
 export interface NativeExtractedImage {

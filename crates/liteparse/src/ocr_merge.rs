@@ -1165,6 +1165,7 @@ mod tests {
             vector_graphics: None,
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
+            annotations: None,
         }
     }
 
@@ -1198,6 +1199,7 @@ mod tests {
             vector_graphics: None,
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
+            annotations: None,
         }
     }
 
@@ -1222,6 +1224,7 @@ mod tests {
             vector_graphics: None,
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
+            annotations: None,
         }
     }
 

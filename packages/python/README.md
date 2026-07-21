@@ -61,6 +61,7 @@ parser = LiteParse(
     image_output_dir="./images",   # Write images and return name/path metadata (optional)
     extract_links=True,            # Render [text](url) links in markdown output
     extract_vector_graphics=False, # Opt-in shapes + merged H/V lines per page
+    extract_annotations=False,     # Include page annotations in structured output
     preserve_very_small_text=False, # Keep tiny text
     include_text_metadata=False,    # Opt in to MCID, font metrics, colors, char codes, and tsg
     password=None,                 # Password for protected documents
@@ -76,6 +77,12 @@ reuse one file, and JSON CLI output contains metadata only—never base64 image 
 ``image_mode="embed"`` also continues to imply extraction. With the defaults
 (``image_mode="placeholder"``, ``extract_images=False``), only lightweight Markdown
 placement refs are collected and ``result.images`` stays empty.
+
+When `extract_annotations` is enabled, each parsed page has an `annotations`
+list containing the subtype, contents, author/title, PDF date strings,
+viewport-space rectangle and quadpoint rectangles, and URI for external link
+annotations. It is independent of `extract_links`, which controls Markdown
+link rendering. The field is `None` when extraction is disabled.
 
 ## Parsing from Bytes
 
@@ -141,6 +148,7 @@ The Python package includes the `lit` CLI:
 ```bash
 lit parse document.pdf
 lit parse document.pdf --format json -o output.json
+lit parse document.pdf --format json --extract-annotations
 lit screenshot document.pdf -o ./screenshots
 lit batch-parse ./input ./output
 lit is-complex document.pdf

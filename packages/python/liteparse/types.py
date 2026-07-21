@@ -50,6 +50,28 @@ class TextItem:
 
 
 @dataclass
+class AnnotationRect:
+    """Annotation rectangle in top-left, 72-DPI viewport coordinates."""
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+@dataclass
+class DocumentAnnotation:
+    """One PDF annotation extracted from a page."""
+    subtype: str
+    contents: Optional[str] = None
+    created: Optional[str] = None
+    modified: Optional[str] = None
+    title: Optional[str] = None
+    rect: Optional[AnnotationRect] = None
+    quadpoint_rects: List[AnnotationRect] = field(default_factory=list)
+    uri: Optional[str] = None
+
+
+@dataclass
 class ParsedPage:
     """A parsed page from a document."""
     page_num: int
@@ -64,6 +86,8 @@ class ParsedPage:
     complexity: Optional[PageComplexityStats] = None
     #: Present only when parsing with ``extract_vector_graphics=True``.
     vector_graphics: Optional[VectorGraphics] = None
+    #: Present only when parsing with ``extract_annotations=True``.
+    annotations: Optional[List[DocumentAnnotation]] = None
 
 
 @dataclass
@@ -221,6 +245,7 @@ class LiteParseConfig:
     image_mode: str
     image_output_dir: Optional[str]
     extract_links: bool
+    extract_annotations: bool
     ocr_failure_fatal: bool
     ocr_hedge_delays_ms: List[int]
     emit_word_boxes: bool

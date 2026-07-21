@@ -37,6 +37,8 @@ export interface LiteParseConfig {
   imageOutputDir?: string;
   /** Render hyperlink annotations as `[text](url)` in markdown output (default: true). */
   extractLinks: boolean;
+  /** Extract all PDF annotations into each parsed page (default: false). */
+  extractAnnotations: boolean;
   preserveVerySmallText: boolean;
   password?: string;
   quiet: boolean;
@@ -202,6 +204,8 @@ export interface ParsedPage {
   complexity?: PageComplexityStats;
   /** Present only when parsing with `extractVectorGraphics: true`. */
   vectorGraphics?: VectorGraphics;
+  /** Present only when `extractAnnotations` is enabled. */
+  annotations?: DocumentAnnotation[];
 }
 
 export interface VectorGraphics {
@@ -225,6 +229,24 @@ export interface VectorLine {
   strokeColor?: string;
   fill: boolean;
   fillColor?: string;
+}
+
+export interface AnnotationRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface DocumentAnnotation {
+  subtype: string;
+  contents?: string;
+  created?: string;
+  modified?: string;
+  title?: string;
+  rect?: AnnotationRect;
+  quadpointRects: AnnotationRect[];
+  uri?: string;
 }
 
 export interface ExtractedImage {
@@ -363,6 +385,7 @@ export class LiteParse {
       extractImages: userConfig.extractImages,
       imageOutputDir: userConfig.imageOutputDir,
       extractLinks: userConfig.extractLinks,
+      extractAnnotations: userConfig.extractAnnotations,
       preserveVerySmallText: userConfig.preserveVerySmallText,
       password: userConfig.password,
       quiet: userConfig.quiet,
@@ -395,6 +418,7 @@ export class LiteParse {
       extractImages: resolved.extractImages ?? false,
       imageOutputDir: resolved.imageOutputDir ?? undefined,
       extractLinks: resolved.extractLinks ?? true,
+      extractAnnotations: resolved.extractAnnotations ?? false,
       preserveVerySmallText: resolved.preserveVerySmallText ?? false,
       password: resolved.password ?? undefined,
       quiet: resolved.quiet ?? false,
@@ -522,6 +546,7 @@ function toPage(p: NativeParsedPage): ParsedPage {
     textItems: p.textItems.map(toTextItem),
     complexity: p.complexity ? toComplexity(p.complexity) : undefined,
     vectorGraphics: p.vectorGraphics ?? undefined,
+    annotations: p.annotations,
   };
 }
 

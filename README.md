@@ -162,6 +162,9 @@ lit parse document.pdf --no-ocr
 # Include page-scoped vector path data in JSON
 lit parse document.pdf --format json --extract-vector-graphics
 
+# Include page annotations in structured JSON
+lit parse document.pdf --format json --extract-annotations
+
 # Parse a remote PDF
 curl -sL https://example.com/report.pdf | lit parse -
 ```
@@ -298,6 +301,7 @@ Options:
       --image-output-dir <dir> Where to write images when --image-mode embed
       --extract-vector-graphics Include page vector shapes and merged H/V lines
       --no-links               Emit link anchor text as plain text (no [text](url)) in markdown
+      --extract-annotations    Include PDF annotations in page output
       --preserve-small-text    Keep very small text
       --password <password>    Password for encrypted documents
       --num-workers <n>        Concurrent OCR workers [default: CPU cores - 1]

@@ -1,5 +1,5 @@
 use crate::ocr_merge::PageComplexityStats;
-use crate::types::{ExtractedImage, ParsedPage, Rect, VectorGraphics};
+use crate::types::{DocumentAnnotation, ExtractedImage, ParsedPage, Rect, VectorGraphics};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -52,6 +52,8 @@ pub(crate) struct JsonPage {
     pub complexity: Option<PageComplexityStats>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vector_graphics: Option<VectorGraphics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<Vec<DocumentAnnotation>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -131,6 +133,7 @@ pub(crate) fn build_json(pages: &[ParsedPage], include_text_metadata: bool) -> P
                     .collect(),
                 complexity: page.complexity.clone(),
                 vector_graphics: page.vector_graphics.clone(),
+                annotations: page.annotations.clone(),
             })
             .collect(),
     }
@@ -181,7 +184,7 @@ pub fn format_json_with_text_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ParsedPage, TextItem};
+    use crate::types::{DocumentAnnotation, ParsedPage, Rect, TextItem};
 
     fn item(text: &str, conf: Option<f32>) -> TextItem {
         TextItem {
@@ -213,6 +216,7 @@ mod tests {
             struct_nodes: vec![],
             image_refs: vec![],
             complexity: None,
+            annotations: None,
         }
     }
 
@@ -355,5 +359,34 @@ mod tests {
         assert!(enabled_json.contains("\"vector_graphics\""));
         assert!(enabled_json.contains("\"has_curve\": true"));
         assert!(enabled_json.contains("\"stroke_color\": \"ff000000\""));
+    }
+
+    #[test]
+    fn test_annotations_are_omitted_when_disabled() {
+        let value = serde_json::to_value(build_json(&[page(vec![])], false)).unwrap();
+        assert!(value["pages"][0].get("annotations").is_none());
+    }
+
+    #[test]
+    fn test_annotations_are_serialized_when_enabled() {
+        let mut parsed_page = page(vec![]);
+        parsed_page.annotations = Some(vec![DocumentAnnotation {
+            subtype: "highlight".into(),
+            contents: Some("review this".into()),
+            created: None,
+            modified: None,
+            title: Some("Reviewer".into()),
+            rect: Some(Rect {
+                x: 10.0,
+                y: 20.0,
+                width: 90.0,
+                height: 20.0,
+            }),
+            quadpoint_rects: vec![],
+            uri: None,
+        }]);
+        let value = serde_json::to_value(build_json(&[parsed_page], false)).unwrap();
+        assert_eq!(value["pages"][0]["annotations"][0]["subtype"], "highlight");
+        assert_eq!(value["pages"][0]["annotations"][0]["rect"]["width"], 90.0);
     }
 }

@@ -255,13 +255,16 @@ link annotations. The field is absent by default; enabled untagged pages contain
 
 ### Document metadata, content bounds, and XFA packets
 
-Every parse result now carries the document's `/Info` `creator` and `producer`
-entries when present, and every page carries `content_bounds` — the union bbox
-of the page's top-level content objects in viewport coords (absent for empty
-pages). Enable `--extract-xfa-packets` (Rust/Python `extract_xfa_packets`,
-JavaScript/WASM `extractXfaPackets`) to add `xfa_packets` with each raw XFA
-packet's index, name, byte length, and XML content; non-XFA documents yield an
-empty list.
+Parse results (Rust/Node/Python APIs) carry the document's `/Info` `creator`
+and `producer` entries when present; these are API-only and never appear in
+CLI JSON output. Enable `--extract-content-bounds` (Rust/Python
+`extract_content_bounds`, JavaScript/WASM `extractContentBounds`) to add a
+per-page `content_bounds` — the union bbox of the page's top-level content
+objects in viewport coords (absent for empty pages). Enable
+`--extract-xfa-packets` (Rust/Python `extract_xfa_packets`, JavaScript/WASM
+`extractXfaPackets`) to add `xfa_packets` with each raw XFA packet's index,
+name, byte length, and XML content; non-XFA documents yield an empty list.
+All of these are off by default, so default JSON output is unchanged.
 
 ### Screenshot raster signals
 

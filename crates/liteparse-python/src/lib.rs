@@ -992,6 +992,8 @@ struct PyLiteParseConfig {
     #[pyo3(get)]
     extract_xfa_packets: bool,
     #[pyo3(get)]
+    extract_content_bounds: bool,
+    #[pyo3(get)]
     detect_screenshot_rects: bool,
     #[pyo3(get)]
     ocr_failure_fatal: bool,
@@ -1059,6 +1061,7 @@ impl PyLiteParseConfig {
             extract_form_fields: cfg.extract_form_fields,
             extract_structure_tree: cfg.extract_structure_tree,
             extract_xfa_packets: cfg.extract_xfa_packets,
+            extract_content_bounds: cfg.extract_content_bounds,
             detect_screenshot_rects: cfg.detect_screenshot_rects,
             ocr_failure_fatal: cfg.ocr_failure_fatal,
             ocr_hedge_delays_ms: cfg.ocr_hedge_delays_ms.clone(),
@@ -1114,6 +1117,7 @@ impl LiteParse {
         extract_form_fields = None,
         extract_structure_tree = None,
         extract_xfa_packets = None,
+        extract_content_bounds = None,
         detect_screenshot_rects = None,
         ocr_failure_fatal = None,
         ocr_hedge_delays_ms = None,
@@ -1146,6 +1150,7 @@ impl LiteParse {
         extract_form_fields: Option<bool>,
         extract_structure_tree: Option<bool>,
         extract_xfa_packets: Option<bool>,
+        extract_content_bounds: Option<bool>,
         detect_screenshot_rects: Option<bool>,
         ocr_failure_fatal: Option<bool>,
         ocr_hedge_delays_ms: Option<Vec<u64>>,
@@ -1227,6 +1232,9 @@ impl LiteParse {
         }
         if let Some(v) = extract_xfa_packets {
             cfg.extract_xfa_packets = v;
+        }
+        if let Some(v) = extract_content_bounds {
+            cfg.extract_content_bounds = v;
         }
         if let Some(v) = detect_screenshot_rects {
             cfg.detect_screenshot_rects = v;

@@ -37,6 +37,7 @@ export interface LiteParseNativeConfig {
   extractFormFields?: boolean;
   extractStructureTree?: boolean;
   extractXfaPackets?: boolean;
+  extractContentBounds?: boolean;
   detectScreenshotRects?: boolean;
   preserveVerySmallText?: boolean;
   password?: string;

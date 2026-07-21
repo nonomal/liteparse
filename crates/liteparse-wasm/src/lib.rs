@@ -62,6 +62,9 @@ pub struct LiteParseConfig {
     /// Extract raw XFA packets (name + XML content) into
     /// `ParseResult.xfaPackets`. Default false.
     extract_xfa_packets: Option<bool>,
+    /// Emit each page's `contentBounds` (union bbox of top-level content
+    /// objects, viewport coords). Default false.
+    extract_content_bounds: Option<bool>,
     ocr_failure_fatal: Option<bool>,
     ocr_hedge_delays_ms: Option<Vec<u64>>,
     preserve_very_small_text: Option<bool>,
@@ -160,6 +163,9 @@ impl LiteParseConfig {
         if let Some(v) = self.extract_xfa_packets {
             cfg.extract_xfa_packets = v;
         }
+        if let Some(v) = self.extract_content_bounds {
+            cfg.extract_content_bounds = v;
+        }
         if let Some(v) = self.ocr_failure_fatal {
             cfg.ocr_failure_fatal = v;
         }
@@ -229,6 +235,7 @@ impl LiteParseConfig {
             extract_form_fields: Some(cfg.extract_form_fields),
             extract_structure_tree: Some(cfg.extract_structure_tree),
             extract_xfa_packets: Some(cfg.extract_xfa_packets),
+            extract_content_bounds: Some(cfg.extract_content_bounds),
             ocr_failure_fatal: Some(cfg.ocr_failure_fatal),
             ocr_hedge_delays_ms: Some(cfg.ocr_hedge_delays_ms.clone()),
             preserve_very_small_text: Some(cfg.preserve_very_small_text),

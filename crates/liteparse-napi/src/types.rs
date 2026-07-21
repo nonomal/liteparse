@@ -65,6 +65,9 @@ pub struct JsLiteParseConfig {
     /// Extract raw XFA packets (name + XML content) into
     /// `ParseResult.xfaPackets`. Default false.
     pub extract_xfa_packets: Option<bool>,
+    /// Emit each page's `contentBounds` (union bbox of top-level content
+    /// objects, viewport coords). Default false.
+    pub extract_content_bounds: Option<bool>,
     /// Detect solid rectangles/lines in rendered page screenshots and attach
     /// them to each screenshot result. Default false.
     pub detect_screenshot_rects: Option<bool>,
@@ -182,6 +185,9 @@ impl JsLiteParseConfig {
         if let Some(v) = self.extract_xfa_packets {
             cfg.extract_xfa_packets = v;
         }
+        if let Some(v) = self.extract_content_bounds {
+            cfg.extract_content_bounds = v;
+        }
         if let Some(v) = self.detect_screenshot_rects {
             cfg.detect_screenshot_rects = v;
         }
@@ -252,6 +258,7 @@ impl JsLiteParseConfig {
             extract_form_fields: Some(cfg.extract_form_fields),
             extract_structure_tree: Some(cfg.extract_structure_tree),
             extract_xfa_packets: Some(cfg.extract_xfa_packets),
+            extract_content_bounds: Some(cfg.extract_content_bounds),
             detect_screenshot_rects: Some(cfg.detect_screenshot_rects),
             ocr_failure_fatal: Some(cfg.ocr_failure_fatal),
             ocr_hedge_delays_ms: Some(

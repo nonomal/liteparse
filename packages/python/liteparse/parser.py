@@ -369,6 +369,7 @@ class LiteParse:
         extract_form_fields: Optional[bool] = None,
         extract_structure_tree: Optional[bool] = None,
         extract_xfa_packets: Optional[bool] = None,
+        extract_content_bounds: Optional[bool] = None,
         detect_screenshot_rects: Optional[bool] = None,
         ocr_failure_fatal: Optional[bool] = None,
         ocr_hedge_delays_ms: Optional[List[int]] = None,
@@ -489,6 +490,8 @@ class LiteParse:
             kwargs["extract_structure_tree"] = extract_structure_tree
         if extract_xfa_packets is not None:
             kwargs["extract_xfa_packets"] = extract_xfa_packets
+        if extract_content_bounds is not None:
+            kwargs["extract_content_bounds"] = extract_content_bounds
         if detect_screenshot_rects is not None:
             kwargs["detect_screenshot_rects"] = detect_screenshot_rects
         if ocr_failure_fatal is not None:
@@ -667,6 +670,7 @@ class LiteParse:
             extract_images=cfg.extract_images,
             extract_vector_graphics=cfg.extract_vector_graphics,
             extract_xfa_packets=cfg.extract_xfa_packets,
+            extract_content_bounds=cfg.extract_content_bounds,
             detect_screenshot_rects=cfg.detect_screenshot_rects,
         )
 

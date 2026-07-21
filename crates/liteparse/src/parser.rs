@@ -431,6 +431,7 @@ impl LiteParse {
                     && self.config.output_format == crate::config::OutputFormat::Markdown,
                 self.glyph_resolver.as_deref(),
                 extract::ExtractionOutputOptions {
+                    extract_content_bounds: self.config.extract_content_bounds,
                     extract_images: self.config.extract_images,
                     emit_word_boxes: self.config.emit_word_boxes,
                     extract_text_metadata: self.config.extract_text_metadata,

@@ -116,9 +116,15 @@ pub(crate) fn extract_pages_and_images(
         if extract_links {
             assign_links(&mut text_items, &page.links(&view_box));
         }
-        let content_bounds = page
-            .content_bounds()
-            .map(|bounds| rect_from_pdfium(page.bounds_to_viewport(&view_box, &bounds)));
+        // Computed when emitted (`extract_content_bounds`) or needed
+        // internally by the white-fill heuristic (`extract_vector_graphics`).
+        let content_bounds = (output_options.extract_content_bounds
+            || output_options.extract_vector_graphics)
+            .then(|| {
+                page.content_bounds()
+                    .map(|bounds| rect_from_pdfium(page.bounds_to_viewport(&view_box, &bounds)))
+            })
+            .flatten();
         let paths = page.path_objects(&view_box);
         let graphics = extract_layout_graphics(&paths);
         let vector_graphics = output_options
@@ -192,7 +198,10 @@ pub(crate) fn extract_pages_and_images(
             page_number: page_number as usize,
             page_width: page.width(),
             page_height: page.height(),
-            content_bounds,
+            content_bounds: output_options
+                .extract_content_bounds
+                .then_some(content_bounds)
+                .flatten(),
             text_items,
             graphics,
             vector_graphics,
@@ -209,6 +218,7 @@ pub(crate) fn extract_pages_and_images(
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ExtractionOutputOptions {
+    pub extract_content_bounds: bool,
     pub extract_text_metadata: bool,
     pub extract_images: bool,
     pub extract_vector_graphics: bool,

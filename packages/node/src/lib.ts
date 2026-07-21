@@ -46,6 +46,8 @@ export interface LiteParseConfig {
   extractStructureTree: boolean;
   /** Extract raw XFA packets (name + XML content) into `ParseResult.xfaPackets` (default: false). */
   extractXfaPackets: boolean;
+  /** Emit each page's `contentBounds` (union bbox of top-level content objects) (default: false). */
+  extractContentBounds: boolean;
   /** Detect solid rectangles/lines in rendered page screenshots (default: false). */
   detectScreenshotRects: boolean;
   preserveVerySmallText: boolean;
@@ -213,6 +215,7 @@ export interface ParsedPage {
    * Union bbox of the page's top-level content objects in viewport coords
    * (visible content extent). Absent for empty pages.
    */
+  /** Present only when `extractContentBounds` is enabled. */
   contentBounds?: Rect;
   text: string;
   markdown: string;
@@ -485,6 +488,7 @@ export class LiteParse {
       extractFormFields: userConfig.extractFormFields,
       extractStructureTree: userConfig.extractStructureTree,
       extractXfaPackets: userConfig.extractXfaPackets,
+      extractContentBounds: userConfig.extractContentBounds,
       detectScreenshotRects: userConfig.detectScreenshotRects,
       preserveVerySmallText: userConfig.preserveVerySmallText,
       password: userConfig.password,
@@ -522,6 +526,7 @@ export class LiteParse {
       extractFormFields: resolved.extractFormFields ?? false,
       extractStructureTree: resolved.extractStructureTree ?? false,
       extractXfaPackets: resolved.extractXfaPackets ?? false,
+      extractContentBounds: resolved.extractContentBounds ?? false,
       detectScreenshotRects: resolved.detectScreenshotRects ?? false,
       preserveVerySmallText: resolved.preserveVerySmallText ?? false,
       password: resolved.password ?? undefined,

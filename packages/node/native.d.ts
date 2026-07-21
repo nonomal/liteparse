@@ -63,6 +63,11 @@ export interface JsLiteParseConfig {
    */
   extractXfaPackets?: boolean
   /**
+   * Emit each page's `contentBounds` (union bbox of top-level content
+   * objects, viewport coords). Default false.
+   */
+  extractContentBounds?: boolean
+  /**
    * Detect solid rectangles/lines in rendered page screenshots and attach
    * them to each screenshot result. Default false.
    */

@@ -73,10 +73,10 @@ pub(crate) struct ParseResultJson {
     pub image_error_count: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub form_type: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub creator: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub producer: Option<String>,
+    /// Raw XFA packets — present only when `extract_xfa_packets` was
+    /// requested, so the default CLI JSON stays stable. The document's
+    /// `/Info` creator/producer are deliberately API-only
+    /// (`ParseResult.creator`/`.producer`) for the same reason.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub xfa_packets: Option<Vec<XfaPacket>>,
 }
@@ -107,8 +107,6 @@ pub(crate) fn build_json(pages: &[ParsedPage], extract_text_metadata: bool) -> P
         images: Vec::new(),
         image_error_count: 0,
         form_type: None,
-        creator: None,
-        producer: None,
         xfa_packets: None,
         pages: pages
             .iter()
@@ -189,8 +187,6 @@ pub fn format_json_result(
         .collect();
     json.image_error_count = result.image_error_count;
     json.form_type = result.form_type;
-    json.creator = result.creator.clone();
-    json.producer = result.producer.clone();
     json.xfa_packets = result.xfa_packets.clone();
     serde_json::to_string_pretty(&json)
 }
@@ -409,8 +405,8 @@ mod tests {
         };
         let value: serde_json::Value =
             serde_json::from_str(&format_json_result(&result, false).unwrap()).unwrap();
-        assert_eq!(value["creator"], "LibreOffice");
-        assert_eq!(value["producer"], "LibreOffice 7.4");
+        assert!(value.get("creator").is_none());
+        assert!(value.get("producer").is_none());
         assert_eq!(value["xfa_packets"][0]["name"], "datasets");
         assert_eq!(value["xfa_packets"][0]["content_length"], 11);
         assert_eq!(value["images"][0]["bbox"]["x"], 10.0);

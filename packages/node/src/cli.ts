@@ -72,6 +72,10 @@ program
     "--extract-xfa-packets",
     "Include raw XFA packets (name + XML content) in JSON output",
   )
+  .option(
+    "--extract-content-bounds",
+    "Include each page's content_bounds in JSON output",
+  )
   .option("--ocr-server-url <url>", "HTTP OCR server URL")
   .option(
     "--ocr-server-header <header>",
@@ -127,6 +131,7 @@ program
       if (opts.extractFormFields) config.extractFormFields = true;
       if (opts.extractStructureTree) config.extractStructureTree = true;
       if (opts.extractXfaPackets) config.extractXfaPackets = true;
+      if (opts.extractContentBounds) config.extractContentBounds = true;
       if (opts.ocrServerUrl)
         config.ocrServerUrl = opts.ocrServerUrl as string;
       if (opts.ocrServerHeader)
@@ -332,6 +337,10 @@ program
     "Include raw XFA packets (name + XML content) in JSON output",
   )
   .option(
+    "--extract-content-bounds",
+    "Include each page's content_bounds in JSON output",
+  )
+  .option(
     "--extract-vector-graphics",
     "Include page-scoped vector shapes and merged horizontal/vertical lines",
   )
@@ -362,7 +371,10 @@ program
         if (opts.extractFormFields) config.extractFormFields = true;
         if (opts.extractStructureTree) config.extractStructureTree = true;
         if (opts.extractXfaPackets) config.extractXfaPackets = true;
+        if (opts.extractContentBounds) config.extractContentBounds = true;
+      if (opts.extractContentBounds) config.extractContentBounds = true;
       if (opts.extractXfaPackets) config.extractXfaPackets = true;
+      if (opts.extractContentBounds) config.extractContentBounds = true;
         if (opts.extractVectorGraphics) config.extractVectorGraphics = true;
 
         const parser = new LiteParse(config);

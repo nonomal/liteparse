@@ -138,8 +138,9 @@ class ParsedPage:
     #: Present only when parsing with ``extract_structure_tree=True``.
     structure_tree: Optional[StructureTree] = None
     #: Union bbox ``(x, y, width, height)`` of the page's top-level content
-    #: objects in viewport coords (visible content extent). ``None`` for
-    #: empty pages.
+    #: objects in viewport coords (visible content extent). Present only when
+    #: parsing with ``extract_content_bounds=True``; ``None`` otherwise (and
+    #: for empty pages).
     content_bounds: Optional[Tuple[float, float, float, float]] = None
 
 
@@ -351,6 +352,7 @@ class LiteParseConfig:
     extract_vector_graphics: bool = False
     extract_xfa_packets: bool = False
     detect_screenshot_rects: bool = False
+    extract_content_bounds: bool = False
 
 
 class ParseError(Exception):

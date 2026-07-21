@@ -66,6 +66,7 @@ const parser = new LiteParse({
   extractFormFields: false,      // Include AcroForm widget fields and values
   extractStructureTree: false,   // Include tagged-PDF logical structure
   extractXfaPackets: false,      // Include raw XFA packets (name + XML content)
+  extractContentBounds: false,   // Include per-page contentBounds union bbox
   detectScreenshotRects: false,  // Detect solid rects/lines in screenshots
   preserveVerySmallText: false,  // Keep tiny text
   extractTextMetadata: false,    // Opt in to MCID, font metrics, colors, char codes, and trailingSpaceGenerated
@@ -99,7 +100,8 @@ title, typed attributes, MCIDs, children, and referenced link annotations. Untag
 pages have an empty `roots` array; the field is omitted when disabled.
 
 Every result also carries the document's `/Info` `creator`/`producer` when
-present, and each page a `contentBounds` union bbox of its top-level content
+present (API-level only — not in CLI JSON), and with `extractContentBounds`
+each page carries a `contentBounds` union bbox of its top-level content
 objects. With `extractXfaPackets`, `result.xfaPackets` lists each raw XFA
 packet (index, name, content length, XML content); non-XFA documents yield an
 empty array. Screenshots draw form-field appearances into the raster and

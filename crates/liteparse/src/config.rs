@@ -54,6 +54,13 @@ pub struct LiteParseConfig {
     /// Extract the tagged-PDF logical structure tree. Default `false`.
     #[serde(default)]
     pub extract_structure_tree: bool,
+    /// Emit each page's `content_bounds` — the union bbox of its top-level
+    /// content objects in viewport coords (visible content extent). Default
+    /// `false` to keep the default output shape unchanged. Content bounds are
+    /// still computed internally for the white-fill heuristic whenever
+    /// `extract_vector_graphics` is on.
+    #[serde(default)]
+    pub extract_content_bounds: bool,
     /// Extract raw XFA packets (name + XML content) from XFA form documents
     /// into `ParseResult.xfa_packets`. Default `false`. Non-XFA documents
     /// yield an empty list.
@@ -187,6 +194,7 @@ impl Default for LiteParseConfig {
             extract_annotations: false,
             extract_form_fields: false,
             extract_structure_tree: false,
+            extract_content_bounds: false,
             extract_xfa_packets: false,
             detect_screenshot_rects: false,
             ocr_failure_fatal: true,

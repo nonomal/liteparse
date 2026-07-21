@@ -137,6 +137,10 @@ struct ParseCommand {
     /// Include raw XFA packets (name + XML content) in JSON output.
     #[arg(long)]
     extract_xfa_packets: bool,
+    /// Include each page's content_bounds (union bbox of top-level content
+    /// objects, viewport coords) in JSON output.
+    #[arg(long)]
+    extract_content_bounds: bool,
 
     /// Include per-page complexity signals (the same `is-complex` reports) as a
     /// `complexity` object on each page of JSON output. Off by default; enabling
@@ -264,6 +268,10 @@ struct BatchParseCommand {
     /// Include raw XFA packets (name + XML content) in JSON output.
     #[arg(long)]
     extract_xfa_packets: bool,
+    /// Include each page's content_bounds (union bbox of top-level content
+    /// objects, viewport coords) in JSON output.
+    #[arg(long)]
+    extract_content_bounds: bool,
 }
 
 #[derive(Args, Debug)]
@@ -387,6 +395,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 extract_form_fields: cmd.extract_form_fields,
                 extract_structure_tree: cmd.extract_structure_tree,
                 extract_xfa_packets: cmd.extract_xfa_packets,
+                extract_content_bounds: cmd.extract_content_bounds,
                 include_complexity: cmd.complexity,
                 extract_text_metadata: cmd.extract_text_metadata,
                 extract_vector_graphics: cmd.extract_vector_graphics,
@@ -488,6 +497,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 extract_form_fields: cmd.extract_form_fields,
                 extract_structure_tree: cmd.extract_structure_tree,
                 extract_xfa_packets: cmd.extract_xfa_packets,
+                extract_content_bounds: cmd.extract_content_bounds,
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {

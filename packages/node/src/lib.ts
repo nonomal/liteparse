@@ -57,6 +57,8 @@ export interface LiteParseConfig {
    * marshalling), so enable only when doing word-level bbox attribution.
    */
   emitWordBoxes: boolean;
+  /** Include rich PDF text metadata on returned text items. Default false. */
+  includeTextMetadata?: boolean;
   /**
    * Restrict output to a page sub-region. Each field is the fraction of the
    * page cropped away from that side (top-left origin), so `{ left: 0.5 }`
@@ -320,6 +322,7 @@ export class LiteParse {
       ocrFailureFatal: userConfig.ocrFailureFatal,
       ocrHedgeDelaysMs: userConfig.ocrHedgeDelaysMs,
       emitWordBoxes: userConfig.emitWordBoxes,
+      includeTextMetadata: userConfig.includeTextMetadata,
       cropBox: userConfig.cropBox,
       skipDiagonalText: userConfig.skipDiagonalText,
       includeComplexity: userConfig.includeComplexity,
@@ -348,6 +351,7 @@ export class LiteParse {
       ocrFailureFatal: resolved.ocrFailureFatal ?? true,
       ocrHedgeDelaysMs: resolved.ocrHedgeDelaysMs ?? [],
       emitWordBoxes: resolved.emitWordBoxes ?? false,
+      includeTextMetadata: resolved.includeTextMetadata ?? false,
       cropBox: resolved.cropBox ?? undefined,
       skipDiagonalText: resolved.skipDiagonalText ?? false,
       includeComplexity: resolved.includeComplexity ?? false,

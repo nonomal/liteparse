@@ -126,6 +126,9 @@ struct ParseCommand {
     /// it runs the extra vector-text detection pass.
     #[arg(long)]
     complexity: bool,
+    /// Include rich PDF text metadata in text items and JSON output.
+    #[arg(long)]
+    include_text_metadata: bool,
 }
 
 #[derive(Args, Debug)]
@@ -219,6 +222,9 @@ struct BatchParseCommand {
     /// page of JSON output. Off by default.
     #[arg(long)]
     complexity: bool,
+    /// Include rich PDF text metadata in text items and JSON output.
+    #[arg(long)]
+    include_text_metadata: bool,
 }
 
 #[derive(Args, Debug)]
@@ -337,6 +343,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 image_mode,
                 extract_links: !cmd.no_links,
                 include_complexity: cmd.complexity,
+                include_text_metadata: cmd.include_text_metadata,
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {
@@ -350,7 +357,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 lp.parse(&cmd.file).await?
             };
             let formatted = match lp.config().output_format {
-                OutputFormat::Json => json::format_json(&result.pages)?,
+                OutputFormat::Json => json::format_json_with_text_metadata(
+                    &result.pages,
+                    lp.config().include_text_metadata,
+                )?,
                 OutputFormat::Text => text::format_text(&result.pages),
                 OutputFormat::Markdown => result.text.clone(),
             };
@@ -442,6 +452,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ocr_server_url: cmd.ocr_server_url,
                 ocr_server_headers: cmd.ocr_server_headers,
                 include_complexity: cmd.complexity,
+                include_text_metadata: cmd.include_text_metadata,
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {
@@ -485,9 +496,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(result) => {
                         let fmt_result: Result<String, Box<dyn std::error::Error>> =
                             match lp.config().output_format {
-                                OutputFormat::Json => {
-                                    json::format_json(&result.pages).map_err(|e| e.into())
-                                }
+                                OutputFormat::Json => json::format_json_with_text_metadata(
+                                    &result.pages,
+                                    lp.config().include_text_metadata,
+                                )
+                                .map_err(|e| e.into()),
                                 OutputFormat::Text => Ok(text::format_text(&result.pages)),
                                 OutputFormat::Markdown => Ok(result.text.clone()),
                             };
@@ -667,7 +680,7 @@ fn collect_files_inner(
 
 #[cfg(test)]
 mod tests {
-    use super::batch_output_path;
+    use super::*;
     use std::path::Path;
 
     #[test]
@@ -682,5 +695,34 @@ mod tests {
         let out_path = batch_output_path("docs/nested/report.pdf", "docs", "out", "md");
 
         assert_eq!(out_path, Path::new("out/nested/report.md"));
+    }
+
+    #[test]
+    fn include_text_metadata_flag_is_available_for_parse_and_batch() {
+        let cli = Cli::try_parse_from(["lit", "parse", "document.pdf", "--include-text-metadata"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Parse(ParseCommand {
+                include_text_metadata: true,
+                ..
+            })
+        ));
+
+        let cli = Cli::try_parse_from([
+            "lit",
+            "batch-parse",
+            "input",
+            "output",
+            "--include-text-metadata",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::BatchParse(BatchParseCommand {
+                include_text_metadata: true,
+                ..
+            })
+        ));
     }
 }

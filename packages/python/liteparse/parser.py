@@ -158,6 +158,7 @@ class LiteParse:
         ocr_failure_fatal: Optional[bool] = None,
         ocr_hedge_delays_ms: Optional[List[int]] = None,
         emit_word_boxes: Optional[bool] = None,
+        include_text_metadata: Optional[bool] = None,
         crop_box: Optional[Tuple[float, float, float, float]] = None,
         skip_diagonal_text: Optional[bool] = None,
         include_complexity: Optional[bool] = None,
@@ -197,6 +198,9 @@ class LiteParse:
                 (``TextItem.words``). Default False. Word boxes roughly double
                 the text-item payload, so enable only for word-level bbox
                 attribution.
+            include_text_metadata: Include rich PDF text metadata on returned
+                text items (MCID, glyph width, font metrics/weight/buggy state,
+                colors, raw character codes, and ``tsg``). Default False.
             crop_box: Restrict output to a page sub-region, as a
                 ``(top, right, bottom, left)`` tuple where each value is the
                 fraction cropped from that side (top-left origin, each in
@@ -249,6 +253,8 @@ class LiteParse:
             kwargs["ocr_hedge_delays_ms"] = ocr_hedge_delays_ms
         if emit_word_boxes is not None:
             kwargs["emit_word_boxes"] = emit_word_boxes
+        if include_text_metadata is not None:
+            kwargs["include_text_metadata"] = include_text_metadata
         if crop_box is not None:
             kwargs["crop_box"] = crop_box
         if skip_diagonal_text is not None:
@@ -395,6 +401,7 @@ class LiteParse:
             crop_box=cfg.crop_box,
             skip_diagonal_text=cfg.skip_diagonal_text,
             include_complexity=cfg.include_complexity,
+            include_text_metadata=cfg.include_text_metadata,
         )
 
     def __repr__(self) -> str:

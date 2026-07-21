@@ -179,6 +179,7 @@ class LiteParseConfig:
     crop_box: Optional[Tuple[float, float, float, float]]
     skip_diagonal_text: bool
     include_complexity: bool
+    include_text_metadata: bool = False
 
 
 class ParseError(Exception):

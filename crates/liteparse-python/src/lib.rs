@@ -554,6 +554,8 @@ struct PyLiteParseConfig {
     include_text_metadata: bool,
     #[pyo3(get)]
     image_output_dir: Option<String>,
+    #[pyo3(get)]
+    extract_images: bool,
 }
 
 #[pymethods]
@@ -607,6 +609,7 @@ impl PyLiteParseConfig {
             include_complexity: cfg.include_complexity,
             include_text_metadata: cfg.include_text_metadata,
             image_output_dir: cfg.image_output_dir.clone(),
+            extract_images: cfg.extract_images,
         }
     }
 }
@@ -641,6 +644,7 @@ impl LiteParse {
         quiet = None,
         num_workers = None,
         image_mode = None,
+        extract_images = None,
         image_output_dir = None,
         extract_links = None,
         ocr_failure_fatal = None,
@@ -666,6 +670,7 @@ impl LiteParse {
         quiet: Option<bool>,
         num_workers: Option<usize>,
         image_mode: Option<String>,
+        extract_images: Option<bool>,
         image_output_dir: Option<String>,
         extract_links: Option<bool>,
         ocr_failure_fatal: Option<bool>,
@@ -726,6 +731,9 @@ impl LiteParse {
                 "embed" => ImageMode::Embed,
                 _ => ImageMode::Placeholder,
             };
+        }
+        if let Some(v) = extract_images {
+            cfg.extract_images = v;
         }
         if let Some(v) = image_output_dir {
             cfg.image_output_dir = Some(v);

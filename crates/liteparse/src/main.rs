@@ -106,6 +106,10 @@ struct ParseCommand {
     #[arg(long, default_value = "placeholder")]
     image_mode: String,
 
+    /// Extract embedded image bytes and metadata.
+    #[arg(long)]
+    extract_images: bool,
+
     /// Directory to write embedded images to. Valid source JPEGs keep their
     /// format; other images are PNG. Setting this enables image extraction
     /// independently of `--image-mode`. Created if missing.
@@ -223,6 +227,9 @@ struct BatchParseCommand {
     /// Include rich PDF text metadata in text items and JSON output.
     #[arg(long)]
     include_text_metadata: bool,
+    /// Extract embedded image bytes and metadata.
+    #[arg(long)]
+    extract_images: bool,
 }
 
 #[derive(Args, Debug)]
@@ -339,6 +346,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ocr_server_url: cmd.ocr_server_url,
                 ocr_server_headers: cmd.ocr_server_headers,
                 image_mode,
+                extract_images: cmd.extract_images,
                 image_output_dir: cmd.image_output_dir.clone(),
                 extract_links: !cmd.no_links,
                 include_complexity: cmd.complexity,
@@ -438,6 +446,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ocr_server_headers: cmd.ocr_server_headers,
                 include_complexity: cmd.complexity,
                 include_text_metadata: cmd.include_text_metadata,
+                extract_images: cmd.extract_images,
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {

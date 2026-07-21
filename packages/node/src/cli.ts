@@ -62,6 +62,7 @@ program
     "--image-output-dir <dir>",
     "Directory to write embedded images to when --image-mode embed is set",
   )
+  .option("--extract-images", "Extract embedded image bytes and metadata")
   .option("--no-links", "Disable hyperlink extraction (emit plain anchor text)")
   .option("--ocr-server-url <url>", "HTTP OCR server URL")
   .option(
@@ -108,6 +109,7 @@ program
         config.imageMode = opts.imageMode as "off" | "placeholder" | "embed";
       if (opts.imageOutputDir)
         config.imageOutputDir = opts.imageOutputDir as string;
+      if (opts.extractImages) config.extractImages = true;
       if (opts.links === false) config.extractLinks = false;
       if (opts.ocrServerUrl)
         config.ocrServerUrl = opts.ocrServerUrl as string;
@@ -314,6 +316,7 @@ program
     "--include-text-metadata",
     "Include rich PDF text metadata in text items and JSON output",
   )
+  .option("--extract-images", "Extract embedded image bytes and metadata")
   .action(
     async (
       inputDir: string,
@@ -336,6 +339,7 @@ program
         if (opts.quiet) config.quiet = true;
         if (opts.numWorkers) config.numWorkers = opts.numWorkers as number;
         if (opts.includeTextMetadata) config.includeTextMetadata = true;
+        if (opts.extractImages) config.extractImages = true;
 
         const parser = new LiteParse(config);
         const outExt = format === "json" ? ".json" : format === "markdown" ? ".md" : ".txt";

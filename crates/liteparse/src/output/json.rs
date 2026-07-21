@@ -1,6 +1,6 @@
 use crate::ocr_merge::PageComplexityStats;
 use crate::types::{
-    DocumentAnnotation, ExtractedImage, FormField, ParsedPage, Rect, VectorGraphics,
+    DocumentAnnotation, ExtractedImage, FormField, ParsedPage, Rect, StructureTree, VectorGraphics,
 };
 use serde::Serialize;
 
@@ -58,6 +58,8 @@ pub(crate) struct JsonPage {
     pub annotations: Option<Vec<DocumentAnnotation>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub form_fields: Option<Vec<FormField>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub structure_tree: Option<StructureTree>,
 }
 
 #[derive(Debug, Serialize)]
@@ -143,6 +145,7 @@ pub(crate) fn build_json(pages: &[ParsedPage], extract_text_metadata: bool) -> P
                 vector_graphics: page.vector_graphics.clone(),
                 annotations: page.annotations.clone(),
                 form_fields: page.form_fields.clone(),
+                structure_tree: page.structure_tree.clone(),
             })
             .collect(),
     }
@@ -196,6 +199,8 @@ pub fn format_json_with_text_metadata(
 mod tests {
     use super::*;
     use crate::types::{DocumentAnnotation, FormField, ParsedPage, Rect, TextItem};
+    use crate::types::{StructureAttributeValue, StructureTree, StructureTreeElement};
+    use std::collections::BTreeMap;
 
     fn item(text: &str, conf: Option<f32>) -> TextItem {
         TextItem {
@@ -229,7 +234,43 @@ mod tests {
             complexity: None,
             annotations: None,
             form_fields: None,
+            structure_tree: None,
         }
+    }
+
+    #[test]
+    fn structure_tree_uses_snake_case_and_preserves_typed_attributes() {
+        let mut page = page(vec![]);
+        page.structure_tree = Some(StructureTree {
+            roots: vec![StructureTreeElement {
+                element_type: "Figure".into(),
+                id: Some("figure-1".into()),
+                actual_text: Some("diagram".into()),
+                alt_text: Some("A diagram".into()),
+                title: None,
+                attributes: BTreeMap::from([
+                    ("Decorative".into(), StructureAttributeValue::Boolean(false)),
+                    ("Width".into(), StructureAttributeValue::Number(42.5)),
+                    (
+                        "Placement".into(),
+                        StructureAttributeValue::String("Block".into()),
+                    ),
+                ]),
+                marked_content_ids: vec![7],
+                children: vec![],
+                annotations: vec![],
+            }],
+        });
+
+        let value = serde_json::to_value(build_json(&[page], false)).unwrap();
+        let root = &value["pages"][0]["structure_tree"]["roots"][0];
+        assert_eq!(root["type"], "Figure");
+        assert_eq!(root["actual_text"], "diagram");
+        assert_eq!(root["marked_content_ids"][0], 7);
+        assert_eq!(root["attributes"]["Decorative"], false);
+        assert_eq!(root["attributes"]["Width"], 42.5);
+        assert_eq!(root["attributes"]["Placement"], "Block");
+        assert!(root.get("actualText").is_none());
     }
 
     #[test]

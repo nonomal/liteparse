@@ -131,6 +131,10 @@ struct ParseCommand {
     #[arg(long)]
     extract_form_fields: bool,
 
+    /// Include the tagged-PDF logical structure tree.
+    #[arg(long)]
+    extract_structure_tree: bool,
+
     /// Include per-page complexity signals (the same `is-complex` reports) as a
     /// `complexity` object on each page of JSON output. Off by default; enabling
     /// it runs the extra vector-text detection pass.
@@ -251,6 +255,9 @@ struct BatchParseCommand {
     /// Include AcroForm widget fields and values as page-scoped structured data.
     #[arg(long)]
     extract_form_fields: bool,
+    /// Include the tagged-PDF logical structure tree.
+    #[arg(long)]
+    extract_structure_tree: bool,
 }
 
 #[derive(Args, Debug)]
@@ -372,6 +379,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 extract_links: !cmd.no_links,
                 extract_annotations: cmd.extract_annotations,
                 extract_form_fields: cmd.extract_form_fields,
+                extract_structure_tree: cmd.extract_structure_tree,
                 include_complexity: cmd.complexity,
                 extract_text_metadata: cmd.extract_text_metadata,
                 extract_vector_graphics: cmd.extract_vector_graphics,
@@ -475,6 +483,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 extract_vector_graphics: cmd.extract_vector_graphics,
                 extract_annotations: cmd.extract_annotations,
                 extract_form_fields: cmd.extract_form_fields,
+                extract_structure_tree: cmd.extract_structure_tree,
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {
@@ -775,6 +784,35 @@ mod tests {
             cli.command,
             Commands::BatchParse(BatchParseCommand {
                 extract_form_fields: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn extract_structure_tree_flag_is_available_for_parse_and_batch() {
+        let cli = Cli::try_parse_from(["lit", "parse", "document.pdf", "--extract-structure-tree"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Parse(ParseCommand {
+                extract_structure_tree: true,
+                ..
+            })
+        ));
+
+        let cli = Cli::try_parse_from([
+            "lit",
+            "batch-parse",
+            "input",
+            "output",
+            "--extract-structure-tree",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::BatchParse(BatchParseCommand {
+                extract_structure_tree: true,
                 ..
             })
         ));

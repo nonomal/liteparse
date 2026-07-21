@@ -46,6 +46,7 @@ pub(crate) fn page(lines: Vec<ProjectedLine>) -> ParsedPage {
         complexity: None,
         annotations: None,
         form_fields: None,
+        structure_tree: None,
     }
 }
 
@@ -200,6 +201,7 @@ pub(crate) fn header_footer_page(n: usize, header: &str, footer: &str, body: &st
         complexity: None,
         annotations: None,
         form_fields: None,
+        structure_tree: None,
     }
 }
 

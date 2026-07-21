@@ -82,6 +82,9 @@ struct ParseCommand {
     /// Include AcroForm widget fields and values.
     #[arg(long)]
     extract_form_fields: bool,
+    /// Include the tagged-PDF logical structure tree.
+    #[arg(long)]
+    extract_structure_tree: bool,
     /// Include per-page complexity signals as a `complexity` object on each
     /// page of JSON output. Off by default.
     #[arg(long)]
@@ -171,6 +174,9 @@ struct BatchParseCommand {
     /// Include page-scoped vector shapes and merged horizontal/vertical lines.
     #[arg(long)]
     extract_vector_graphics: bool,
+    /// Include the tagged-PDF logical structure tree.
+    #[arg(long)]
+    extract_structure_tree: bool,
 }
 
 /// Parse a `Name: Value` header string into a `(name, value)` pair.
@@ -252,6 +258,7 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 extract_links: !cmd.no_links,
                 extract_annotations: cmd.extract_annotations,
                 extract_form_fields: cmd.extract_form_fields,
+                extract_structure_tree: cmd.extract_structure_tree,
                 include_complexity: cmd.complexity,
                 extract_text_metadata: cmd.extract_text_metadata,
                 extract_vector_graphics: cmd.extract_vector_graphics,
@@ -348,6 +355,7 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 extract_text_metadata: cmd.extract_text_metadata,
                 extract_images: cmd.extract_images,
                 extract_vector_graphics: cmd.extract_vector_graphics,
+                extract_structure_tree: cmd.extract_structure_tree,
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {

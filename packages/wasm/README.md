@@ -70,6 +70,7 @@ All optional, camelCase:
 | `extractLinks` | `boolean` | `true` | Render hyperlink annotations as `[text](url)` in markdown output |
 | `extractVectorGraphics` | `boolean` | `false` | Include page-scoped shapes and merged horizontal/vertical lines |
 | `extractAnnotations` | `boolean` | `false` | Include page annotations and their metadata/geometry in structured output |
+| `extractStructureTree` | `boolean` | `false` | Include the tagged-PDF logical structure tree |
 | `preserveVerySmallText` | `boolean` | `false` | Keep tiny text that's normally filtered |
 | `password` | `string` | — | Password for protected PDFs |
 | `quiet` | `boolean` | `false` | Suppress progress logging |

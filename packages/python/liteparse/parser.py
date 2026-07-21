@@ -10,6 +10,8 @@ from .types import (
     AnnotationRect,
     DocumentAnnotation,
     FormField,
+    StructureTree,
+    StructureTreeElement,
     ExtractedImage,
     ImageRect,
     LayoutComplexityStats,
@@ -25,6 +27,53 @@ from .types import (
     VectorLine,
     VectorShape,
 )
+
+
+def _convert_annotation(annotation: Any) -> DocumentAnnotation:
+    return DocumentAnnotation(
+        subtype=annotation.subtype,
+        contents=annotation.contents,
+        created=annotation.created,
+        modified=annotation.modified,
+        title=annotation.title,
+        rect=(
+            AnnotationRect(
+                x=annotation.rect.x,
+                y=annotation.rect.y,
+                width=annotation.rect.width,
+                height=annotation.rect.height,
+            )
+            if annotation.rect is not None
+            else None
+        ),
+        quadpoint_rects=[
+            AnnotationRect(x=r.x, y=r.y, width=r.width, height=r.height)
+            for r in annotation.quadpoint_rects
+        ],
+        uri=annotation.uri,
+    )
+
+
+def _convert_structure_element(element: Any) -> StructureTreeElement:
+    attributes = {}
+    for attribute in element.attributes:
+        if attribute.boolean_value is not None:
+            attributes[attribute.name] = attribute.boolean_value
+        elif attribute.number_value is not None:
+            attributes[attribute.name] = attribute.number_value
+        elif attribute.string_value is not None:
+            attributes[attribute.name] = attribute.string_value
+    return StructureTreeElement(
+        element_type=element.element_type,
+        id=element.id,
+        actual_text=element.actual_text,
+        alt_text=element.alt_text,
+        title=element.title,
+        attributes=attributes,
+        marked_content_ids=list(element.marked_content_ids),
+        children=[_convert_structure_element(child) for child in element.children],
+        annotations=[_convert_annotation(a) for a in element.annotations],
+    )
 
 
 def _convert_complexity(s: Any) -> PageComplexityStats:
@@ -103,6 +152,7 @@ def _convert_native_result(native_result: Any) -> ParseResult:
         native_vectors = getattr(native_page, "vector_graphics", None)
         native_annotations = getattr(native_page, "annotations", None)
         native_form_fields = getattr(native_page, "form_fields", None)
+        native_structure_tree = getattr(native_page, "structure_tree", None)
         pages.append(
             ParsedPage(
                 page_num=native_page.page_num,
@@ -207,6 +257,16 @@ def _convert_native_result(native_result: Any) -> ParseResult:
                     if native_form_fields is not None
                     else None
                 ),
+                structure_tree=(
+                    StructureTree(
+                        roots=[
+                            _convert_structure_element(root)
+                            for root in native_structure_tree.roots
+                        ]
+                    )
+                    if native_structure_tree is not None
+                    else None
+                ),
             )
         )
     images = [
@@ -274,6 +334,7 @@ class LiteParse:
         extract_links: Optional[bool] = None,
         extract_annotations: Optional[bool] = None,
         extract_form_fields: Optional[bool] = None,
+        extract_structure_tree: Optional[bool] = None,
         ocr_failure_fatal: Optional[bool] = None,
         ocr_hedge_delays_ms: Optional[List[int]] = None,
         emit_word_boxes: Optional[bool] = None,
@@ -313,6 +374,8 @@ class LiteParse:
                 structured data (default: False).
             extract_form_fields: Include AcroForm widget fields and values as
                 page-scoped structured data (default: False).
+            extract_structure_tree: Include the tagged-PDF logical structure
+                tree as page-scoped structured data (default: False).
             ocr_failure_fatal: Whether a systemic OCR failure (every OCR task
                 failed and at least one was a text-sparse page) aborts the whole
                 parse (default: True). Set False to keep already-recovered native
@@ -387,6 +450,8 @@ class LiteParse:
             kwargs["extract_annotations"] = extract_annotations
         if extract_form_fields is not None:
             kwargs["extract_form_fields"] = extract_form_fields
+        if extract_structure_tree is not None:
+            kwargs["extract_structure_tree"] = extract_structure_tree
         if ocr_failure_fatal is not None:
             kwargs["ocr_failure_fatal"] = ocr_failure_fatal
         if ocr_hedge_delays_ms is not None:
@@ -540,6 +605,7 @@ class LiteParse:
             extract_links=cfg.extract_links,
             extract_annotations=cfg.extract_annotations,
             extract_form_fields=cfg.extract_form_fields,
+            extract_structure_tree=cfg.extract_structure_tree,
             ocr_failure_fatal=cfg.ocr_failure_fatal,
             ocr_hedge_delays_ms=list(cfg.ocr_hedge_delays_ms),
             emit_word_boxes=cfg.emit_word_boxes,

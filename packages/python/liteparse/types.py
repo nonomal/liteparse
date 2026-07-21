@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 
 @dataclass
@@ -93,6 +93,29 @@ class FormField:
     selected_options: List[str] = field(default_factory=list)
 
 
+StructureAttributeValue = Union[bool, float, str]
+
+
+@dataclass
+class StructureTreeElement:
+    """One element in a tagged-PDF logical structure tree."""
+    element_type: str
+    id: Optional[str] = None
+    actual_text: Optional[str] = None
+    alt_text: Optional[str] = None
+    title: Optional[str] = None
+    attributes: Dict[str, StructureAttributeValue] = field(default_factory=dict)
+    marked_content_ids: List[int] = field(default_factory=list)
+    children: List[StructureTreeElement] = field(default_factory=list)
+    annotations: List[DocumentAnnotation] = field(default_factory=list)
+
+
+@dataclass
+class StructureTree:
+    """Complete page-scoped tagged-PDF logical structure."""
+    roots: List[StructureTreeElement] = field(default_factory=list)
+
+
 @dataclass
 class ParsedPage:
     """A parsed page from a document."""
@@ -112,6 +135,8 @@ class ParsedPage:
     annotations: Optional[List[DocumentAnnotation]] = None
     #: Present only when parsing with ``extract_form_fields=True``.
     form_fields: Optional[List[FormField]] = None
+    #: Present only when parsing with ``extract_structure_tree=True``.
+    structure_tree: Optional[StructureTree] = None
 
 
 @dataclass
@@ -273,6 +298,7 @@ class LiteParseConfig:
     extract_links: bool
     extract_annotations: bool
     extract_form_fields: bool
+    extract_structure_tree: bool
     ocr_failure_fatal: bool
     ocr_hedge_delays_ms: List[int]
     emit_word_boxes: bool

@@ -158,6 +158,91 @@ struct PyDocumentAnnotation {
     uri: Option<String>,
 }
 
+#[pyclass(frozen, from_py_object)]
+#[derive(Clone)]
+struct PyStructureAttribute {
+    #[pyo3(get)]
+    name: String,
+    #[pyo3(get)]
+    boolean_value: Option<bool>,
+    #[pyo3(get)]
+    number_value: Option<f64>,
+    #[pyo3(get)]
+    string_value: Option<String>,
+}
+
+#[pyclass(frozen, from_py_object)]
+#[derive(Clone)]
+struct PyStructureTreeElement {
+    #[pyo3(get)]
+    element_type: String,
+    #[pyo3(get)]
+    id: Option<String>,
+    #[pyo3(get)]
+    actual_text: Option<String>,
+    #[pyo3(get)]
+    alt_text: Option<String>,
+    #[pyo3(get)]
+    title: Option<String>,
+    #[pyo3(get)]
+    attributes: Vec<PyStructureAttribute>,
+    #[pyo3(get)]
+    marked_content_ids: Vec<i32>,
+    #[pyo3(get)]
+    children: Vec<PyStructureTreeElement>,
+    #[pyo3(get)]
+    annotations: Vec<PyDocumentAnnotation>,
+}
+
+#[pyclass(frozen, from_py_object)]
+#[derive(Clone)]
+struct PyStructureTree {
+    #[pyo3(get)]
+    roots: Vec<PyStructureTreeElement>,
+}
+
+impl PyStructureTreeElement {
+    fn from_rust(element: liteparse::types::StructureTreeElement) -> Self {
+        Self {
+            element_type: element.element_type,
+            id: element.id,
+            actual_text: element.actual_text,
+            alt_text: element.alt_text,
+            title: element.title,
+            attributes: element
+                .attributes
+                .into_iter()
+                .map(|(name, value)| {
+                    let (boolean_value, number_value, string_value) = match value {
+                        liteparse::types::StructureAttributeValue::Boolean(value) => {
+                            (Some(value), None, None)
+                        }
+                        liteparse::types::StructureAttributeValue::Number(value) => {
+                            (None, Some(f64::from(value)), None)
+                        }
+                        liteparse::types::StructureAttributeValue::String(value) => {
+                            (None, None, Some(value))
+                        }
+                    };
+                    PyStructureAttribute {
+                        name,
+                        boolean_value,
+                        number_value,
+                        string_value,
+                    }
+                })
+                .collect(),
+            marked_content_ids: element.marked_content_ids,
+            children: element.children.into_iter().map(Self::from_rust).collect(),
+            annotations: element
+                .annotations
+                .into_iter()
+                .map(PyDocumentAnnotation::from_rust)
+                .collect(),
+        }
+    }
+}
+
 impl PyDocumentAnnotation {
     fn from_rust(annotation: liteparse::types::DocumentAnnotation) -> Self {
         Self {
@@ -337,6 +422,8 @@ struct PyParsedPage {
     annotations: Option<Vec<PyDocumentAnnotation>>,
     #[pyo3(get)]
     form_fields: Option<Vec<PyFormField>>,
+    #[pyo3(get)]
+    structure_tree: Option<PyStructureTree>,
 }
 
 #[pyclass(frozen, from_py_object)]
@@ -480,6 +567,13 @@ impl PyParsedPage {
             form_fields: page
                 .form_fields
                 .map(|fields| fields.into_iter().map(PyFormField::from_rust).collect()),
+            structure_tree: page.structure_tree.map(|tree| PyStructureTree {
+                roots: tree
+                    .roots
+                    .into_iter()
+                    .map(PyStructureTreeElement::from_rust)
+                    .collect(),
+            }),
         }
     }
 }
@@ -810,6 +904,8 @@ struct PyLiteParseConfig {
     #[pyo3(get)]
     extract_form_fields: bool,
     #[pyo3(get)]
+    extract_structure_tree: bool,
+    #[pyo3(get)]
     ocr_failure_fatal: bool,
     #[pyo3(get)]
     ocr_hedge_delays_ms: Vec<u64>,
@@ -873,6 +969,7 @@ impl PyLiteParseConfig {
             extract_links: cfg.extract_links,
             extract_annotations: cfg.extract_annotations,
             extract_form_fields: cfg.extract_form_fields,
+            extract_structure_tree: cfg.extract_structure_tree,
             ocr_failure_fatal: cfg.ocr_failure_fatal,
             ocr_hedge_delays_ms: cfg.ocr_hedge_delays_ms.clone(),
             emit_word_boxes: cfg.emit_word_boxes,
@@ -925,6 +1022,7 @@ impl LiteParse {
         extract_links = None,
         extract_annotations = None,
         extract_form_fields = None,
+        extract_structure_tree = None,
         ocr_failure_fatal = None,
         ocr_hedge_delays_ms = None,
         emit_word_boxes = None,
@@ -954,6 +1052,7 @@ impl LiteParse {
         extract_links: Option<bool>,
         extract_annotations: Option<bool>,
         extract_form_fields: Option<bool>,
+        extract_structure_tree: Option<bool>,
         ocr_failure_fatal: Option<bool>,
         ocr_hedge_delays_ms: Option<Vec<u64>>,
         emit_word_boxes: Option<bool>,
@@ -1028,6 +1127,9 @@ impl LiteParse {
         }
         if let Some(v) = extract_form_fields {
             cfg.extract_form_fields = v;
+        }
+        if let Some(v) = extract_structure_tree {
+            cfg.extract_structure_tree = v;
         }
         if let Some(v) = ocr_failure_fatal {
             cfg.ocr_failure_fatal = v;
@@ -1240,6 +1342,9 @@ fn _liteparse(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWordBox>()?;
     m.add_class::<PyAnnotationRect>()?;
     m.add_class::<PyDocumentAnnotation>()?;
+    m.add_class::<PyStructureAttribute>()?;
+    m.add_class::<PyStructureTreeElement>()?;
+    m.add_class::<PyStructureTree>()?;
     m.add_class::<PyFormField>()?;
     m.add_class::<PyScreenshotResult>()?;
     m.add_class::<PyPageComplexityStats>()?;

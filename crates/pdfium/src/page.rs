@@ -185,6 +185,7 @@ pub struct PdfLink {
 /// origin, 72 DPI). String fields mirror the standard annotation dictionary.
 #[derive(Debug, Clone)]
 pub struct PdfAnnotation {
+    pub object_number: Option<i32>,
     pub subtype: String,
     pub contents: Option<String>,
     pub created: Option<String>,
@@ -765,6 +766,10 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
             };
 
             out.push(PdfAnnotation {
+                object_number: match unsafe { ffi!(FPDFAnnot_GetObjNum(annot)) } {
+                    number if number > 0 => Some(number),
+                    _ => None,
+                },
                 subtype: annotation_subtype_name(subtype).to_string(),
                 contents: read_annotation_string(annot, b"Contents\0"),
                 created: read_annotation_string(annot, b"CreationDate\0"),

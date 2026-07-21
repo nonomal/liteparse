@@ -7,6 +7,7 @@ import {
   type NativePageInput,
   type NativeTextItem,
   type NativeExtractedImage,
+  type NativeStructureTreeElement,
   type NativePageComplexityStats,
 } from "./native.js";
 
@@ -41,6 +42,8 @@ export interface LiteParseConfig {
   extractAnnotations: boolean;
   /** Extract AcroForm widget fields and values (default: false). */
   extractFormFields: boolean;
+  /** Extract the tagged-PDF logical structure tree (default: false). */
+  extractStructureTree: boolean;
   preserveVerySmallText: boolean;
   password?: string;
   quiet: boolean;
@@ -210,6 +213,26 @@ export interface ParsedPage {
   annotations?: DocumentAnnotation[];
   /** Present only when `extractFormFields` is enabled. */
   formFields?: FormField[];
+  /** Present only when `extractStructureTree` is enabled. */
+  structureTree?: StructureTree;
+}
+
+export type StructureAttributeValue = boolean | number | string;
+
+export interface StructureTree {
+  roots: StructureTreeElement[];
+}
+
+export interface StructureTreeElement {
+  type: string;
+  id?: string;
+  actualText?: string;
+  altText?: string;
+  title?: string;
+  attributes: Record<string, StructureAttributeValue>;
+  markedContentIds: number[];
+  children: StructureTreeElement[];
+  annotations: DocumentAnnotation[];
 }
 
 export interface VectorGraphics {
@@ -413,6 +436,7 @@ export class LiteParse {
       extractLinks: userConfig.extractLinks,
       extractAnnotations: userConfig.extractAnnotations,
       extractFormFields: userConfig.extractFormFields,
+      extractStructureTree: userConfig.extractStructureTree,
       preserveVerySmallText: userConfig.preserveVerySmallText,
       password: userConfig.password,
       quiet: userConfig.quiet,
@@ -447,6 +471,7 @@ export class LiteParse {
       extractLinks: resolved.extractLinks ?? true,
       extractAnnotations: resolved.extractAnnotations ?? false,
       extractFormFields: resolved.extractFormFields ?? false,
+      extractStructureTree: resolved.extractStructureTree ?? false,
       preserveVerySmallText: resolved.preserveVerySmallText ?? false,
       password: resolved.password ?? undefined,
       quiet: resolved.quiet ?? false,
@@ -595,6 +620,35 @@ function toPage(p: NativeParsedPage): ParsedPage {
       options: field.options,
       selectedOptions: field.selectedOptions,
     })),
+    structureTree: p.structureTree
+      ? { roots: p.structureTree.roots.map(toStructureTreeElement) }
+      : undefined,
+  };
+}
+
+function toStructureTreeElement(
+  element: NativeStructureTreeElement,
+): StructureTreeElement {
+  const attributes: Record<string, StructureAttributeValue> = {};
+  for (const attribute of element.attributes) {
+    if (attribute.booleanValue !== undefined) {
+      attributes[attribute.name] = attribute.booleanValue;
+    } else if (attribute.numberValue !== undefined) {
+      attributes[attribute.name] = attribute.numberValue;
+    } else if (attribute.stringValue !== undefined) {
+      attributes[attribute.name] = attribute.stringValue;
+    }
+  }
+  return {
+    type: element.elementType,
+    id: element.id,
+    actualText: element.actualText,
+    altText: element.altText,
+    title: element.title,
+    attributes,
+    markedContentIds: element.markedContentIds,
+    children: element.children.map(toStructureTreeElement),
+    annotations: element.annotations,
   };
 }
 

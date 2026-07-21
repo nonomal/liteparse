@@ -17,7 +17,7 @@ pub use page::{
     ImageBounds, ImageObjectInfo, ImageObjects, Page, PathObject, PathSegment, PdfAnnotation,
     PdfFormField, PdfLink, SegmentKind, ViewportTransform,
 };
-pub use struct_tree::StructNode;
+pub use struct_tree::{StructNode, StructureAttributeValue, StructureElement};
 pub use text_page::{TextChar, TextCharIter, TextPage};
 pub use types::*;
 

@@ -51,6 +51,9 @@ pub struct LiteParseConfig {
     /// Extract AcroForm widget fields and values. Default `false`.
     #[serde(default)]
     pub extract_form_fields: bool,
+    /// Extract the tagged-PDF logical structure tree. Default `false`.
+    #[serde(default)]
+    pub extract_structure_tree: bool,
     /// Whether a systemic OCR failure (every OCR task failed *and* at least one
     /// was a text-sparse page whose primary text source was OCR) aborts the
     /// whole parse. Default `true`: surface the root cause instead of silently
@@ -172,6 +175,7 @@ impl Default for LiteParseConfig {
             extract_links: true,
             extract_annotations: false,
             extract_form_fields: false,
+            extract_structure_tree: false,
             ocr_failure_fatal: true,
             ocr_hedge_delays_ms: Vec::new(),
             emit_word_boxes: false,
@@ -300,6 +304,7 @@ mod tests {
         assert!(!c.extract_text_metadata);
         assert!(c.password.is_none());
         assert!(!c.extract_images);
+        assert!(!c.extract_structure_tree);
     }
 
     #[test]

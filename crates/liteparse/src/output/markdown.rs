@@ -162,6 +162,7 @@ mod tests {
             complexity: None,
             annotations: None,
             form_fields: None,
+            structure_tree: None,
         }
     }
 
@@ -214,6 +215,7 @@ mod tests {
             complexity: None,
             annotations: None,
             form_fields: None,
+            structure_tree: None,
         };
         let out = format_markdown(&[p], &[], ImageMode::Placeholder);
         assert!(out.contains("```text"));

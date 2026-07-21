@@ -53,7 +53,10 @@ export interface JsLiteParseConfig {
   extractLinks?: boolean
   /** Extract all PDF annotations as page-scoped structured data. */
   extractAnnotations?: boolean
+  /** Extract AcroForm widget fields and values. */
   extractFormFields?: boolean
+  /** Extract the tagged-PDF logical structure tree. */
+  extractStructureTree?: boolean
   /**
    * Whether a systemic OCR failure aborts the whole parse (default true).
    * Set false to keep already-recovered native text and return partial
@@ -198,6 +201,27 @@ export interface JsParsedPage {
   vectorGraphics?: JsVectorGraphics
   annotations?: Array<JsDocumentAnnotation>
   formFields?: Array<JsFormField>
+  structureTree?: JsStructureTree
+}
+export interface JsStructureAttribute {
+  name: string
+  booleanValue?: boolean
+  numberValue?: number
+  stringValue?: string
+}
+export interface JsStructureTree {
+  roots: Array<JsStructureTreeElement>
+}
+export interface JsStructureTreeElement {
+  elementType: string
+  id?: string
+  actualText?: string
+  altText?: string
+  title?: string
+  attributes: Array<JsStructureAttribute>
+  markedContentIds: Array<number>
+  children: Array<JsStructureTreeElement>
+  annotations: Array<JsDocumentAnnotation>
 }
 export interface JsVectorShape {
   bbox: JsRect
@@ -244,7 +268,6 @@ export interface JsDocumentAnnotation {
   quadpointRects: Array<JsAnnotationRect>
   uri?: string
 }
-
 export interface JsFormField {
   id: string
   fieldType: string

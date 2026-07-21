@@ -5,8 +5,9 @@ use napi_derive::napi;
 use liteparse::config::{CropBox, ImageMode, LiteParseConfig, OutputFormat};
 use liteparse::parser::ParseResult;
 use liteparse::types::{
-    DocumentAnnotation, FormField, GraphicPrimitive, Page, ParsedPage, Rect, TextItem,
-    VectorGraphics, WordBox,
+    DocumentAnnotation, FormField, GraphicPrimitive, Page, ParsedPage, Rect,
+    StructureAttributeValue, StructureTree, StructureTreeElement, TextItem, VectorGraphics,
+    WordBox,
 };
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,8 @@ pub struct JsLiteParseConfig {
     pub extract_annotations: Option<bool>,
     /// Extract AcroForm widget fields and values.
     pub extract_form_fields: Option<bool>,
+    /// Extract the tagged-PDF logical structure tree.
+    pub extract_structure_tree: Option<bool>,
     /// Whether a systemic OCR failure aborts the whole parse (default true).
     /// Set false to keep already-recovered native text and return partial
     /// results when OCR is unavailable, instead of rejecting.
@@ -167,6 +170,9 @@ impl JsLiteParseConfig {
         if let Some(v) = self.extract_form_fields {
             cfg.extract_form_fields = v;
         }
+        if let Some(v) = self.extract_structure_tree {
+            cfg.extract_structure_tree = v;
+        }
         if let Some(v) = self.ocr_failure_fatal {
             cfg.ocr_failure_fatal = v;
         }
@@ -232,6 +238,7 @@ impl JsLiteParseConfig {
             extract_links: Some(cfg.extract_links),
             extract_annotations: Some(cfg.extract_annotations),
             extract_form_fields: Some(cfg.extract_form_fields),
+            extract_structure_tree: Some(cfg.extract_structure_tree),
             ocr_failure_fatal: Some(cfg.ocr_failure_fatal),
             ocr_hedge_delays_ms: Some(
                 cfg.ocr_hedge_delays_ms
@@ -492,6 +499,7 @@ impl JsPageInput {
             image_refs: Vec::new(),
             annotations: None,
             form_fields: None,
+            structure_tree: None,
         }
     }
 }
@@ -513,6 +521,86 @@ pub struct JsParsedPage {
     pub vector_graphics: Option<JsVectorGraphics>,
     pub annotations: Option<Vec<JsDocumentAnnotation>>,
     pub form_fields: Option<Vec<JsFormField>>,
+    pub structure_tree: Option<JsStructureTree>,
+}
+
+#[napi(object)]
+#[derive(Clone)]
+pub struct JsStructureAttribute {
+    pub name: String,
+    pub boolean_value: Option<bool>,
+    pub number_value: Option<f64>,
+    pub string_value: Option<String>,
+}
+
+#[napi(object)]
+#[derive(Clone)]
+pub struct JsStructureTree {
+    pub roots: Vec<JsStructureTreeElement>,
+}
+
+#[napi(object)]
+#[derive(Clone)]
+pub struct JsStructureTreeElement {
+    pub element_type: String,
+    pub id: Option<String>,
+    pub actual_text: Option<String>,
+    pub alt_text: Option<String>,
+    pub title: Option<String>,
+    pub attributes: Vec<JsStructureAttribute>,
+    pub marked_content_ids: Vec<i32>,
+    pub children: Vec<JsStructureTreeElement>,
+    pub annotations: Vec<JsDocumentAnnotation>,
+}
+
+impl JsStructureTree {
+    fn from_rust(tree: &StructureTree) -> Self {
+        Self {
+            roots: tree
+                .roots
+                .iter()
+                .map(JsStructureTreeElement::from_rust)
+                .collect(),
+        }
+    }
+}
+
+impl JsStructureTreeElement {
+    fn from_rust(element: &StructureTreeElement) -> Self {
+        Self {
+            element_type: element.element_type.clone(),
+            id: element.id.clone(),
+            actual_text: element.actual_text.clone(),
+            alt_text: element.alt_text.clone(),
+            title: element.title.clone(),
+            attributes: element
+                .attributes
+                .iter()
+                .map(|(name, value)| {
+                    let (boolean_value, number_value, string_value) = match value {
+                        StructureAttributeValue::Boolean(value) => (Some(*value), None, None),
+                        StructureAttributeValue::Number(value) => {
+                            (None, Some(f64::from(*value)), None)
+                        }
+                        StructureAttributeValue::String(value) => (None, None, Some(value.clone())),
+                    };
+                    JsStructureAttribute {
+                        name: name.clone(),
+                        boolean_value,
+                        number_value,
+                        string_value,
+                    }
+                })
+                .collect(),
+            marked_content_ids: element.marked_content_ids.clone(),
+            children: element.children.iter().map(Self::from_rust).collect(),
+            annotations: element
+                .annotations
+                .iter()
+                .map(JsDocumentAnnotation::from_rust)
+                .collect(),
+        }
+    }
 }
 
 #[napi(object)]
@@ -724,6 +812,7 @@ impl JsParsedPage {
                 .form_fields
                 .as_ref()
                 .map(|fields| fields.iter().map(JsFormField::from_rust).collect()),
+            structure_tree: page.structure_tree.as_ref().map(JsStructureTree::from_rust),
         }
     }
 }

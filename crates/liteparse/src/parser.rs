@@ -393,6 +393,7 @@ impl LiteParse {
                     extract_vector_graphics: self.config.extract_vector_graphics,
                     extract_annotations: self.config.extract_annotations,
                     extract_form_fields: self.config.extract_form_fields,
+                    extract_structure_tree: self.config.extract_structure_tree,
                 },
             )?;
             let t_extract = web_time::Instant::now();
@@ -662,6 +663,7 @@ mod tests {
             image_refs: vec![],
             annotations: None,
             form_fields: None,
+            structure_tree: None,
         }
     }
 

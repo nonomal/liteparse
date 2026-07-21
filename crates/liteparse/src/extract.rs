@@ -2,8 +2,8 @@ use crate::error::LiteParseError;
 use crate::glyph_names::resolve_glyph_name;
 use crate::types::{
     DocumentAnnotation, ExtractedImage, FormField, GraphicPrimitive, ImageRef, OutlineTarget,
-    Page as LitePage, PdfInput, Rect, StructNode, TextItem, VectorGraphics, VectorLine,
-    VectorShape, WordBox,
+    Page as LitePage, PdfInput, Rect, StructNode, StructureAttributeValue, StructureTree,
+    StructureTreeElement, TextItem, VectorGraphics, VectorLine, VectorShape, WordBox,
 };
 use image::ImageEncoder;
 use pdfium::{
@@ -127,24 +127,26 @@ pub(crate) fn extract_pages_and_images(
             extract_page_image_refs(&page, page_number, output_options.extract_images);
         let mut image_refs = extracted_refs.refs;
         image_error_count += extracted_refs.error_count;
-        let annotations = output_options.extract_annotations.then(|| {
-            page.annotations(&view_box)
-                .into_iter()
-                .map(|annotation| DocumentAnnotation {
-                    subtype: annotation.subtype,
-                    contents: annotation.contents,
-                    created: annotation.created,
-                    modified: annotation.modified,
-                    title: annotation.title,
-                    rect: annotation.rect.map(rect_from_pdfium),
-                    quadpoint_rects: annotation
-                        .quadpoint_rects
-                        .into_iter()
-                        .map(rect_from_pdfium)
-                        .collect(),
-                    uri: annotation.uri,
-                })
-                .collect()
+        let pdf_annotations = (output_options.extract_annotations
+            || output_options.extract_structure_tree)
+            .then(|| page.annotations(&view_box))
+            .unwrap_or_default();
+        let annotations = output_options
+            .extract_annotations
+            .then(|| pdf_annotations.iter().map(document_annotation).collect());
+        let structure_tree = output_options.extract_structure_tree.then(|| {
+            let annotations_by_object = pdf_annotations
+                .iter()
+                .filter(|annotation| annotation.subtype == "link")
+                .filter_map(|annotation| annotation.object_number.map(|n| (n, annotation)))
+                .collect::<std::collections::HashMap<_, _>>();
+            StructureTree {
+                roots: page
+                    .structure_tree()
+                    .into_iter()
+                    .map(|element| structure_tree_element(element, &annotations_by_object))
+                    .collect(),
+            }
         });
         let form_fields = output_options.extract_form_fields.then(|| {
             form_environment.as_ref().map_or_else(Vec::new, |form| {
@@ -194,6 +196,7 @@ pub(crate) fn extract_pages_and_images(
             image_refs,
             annotations,
             form_fields,
+            structure_tree,
         });
     }
 
@@ -207,7 +210,64 @@ pub(crate) struct ExtractionOutputOptions {
     pub extract_vector_graphics: bool,
     pub extract_annotations: bool,
     pub extract_form_fields: bool,
+    pub extract_structure_tree: bool,
     pub emit_word_boxes: bool,
+}
+
+fn document_annotation(annotation: &pdfium::PdfAnnotation) -> DocumentAnnotation {
+    DocumentAnnotation {
+        subtype: annotation.subtype.clone(),
+        contents: annotation.contents.clone(),
+        created: annotation.created.clone(),
+        modified: annotation.modified.clone(),
+        title: annotation.title.clone(),
+        rect: annotation.rect.map(rect_from_pdfium),
+        quadpoint_rects: annotation
+            .quadpoint_rects
+            .iter()
+            .copied()
+            .map(rect_from_pdfium)
+            .collect(),
+        uri: annotation.uri.clone(),
+    }
+}
+
+fn structure_tree_element(
+    element: pdfium::StructureElement,
+    annotations_by_object: &std::collections::HashMap<i32, &pdfium::PdfAnnotation>,
+) -> StructureTreeElement {
+    let attributes = element
+        .attributes
+        .into_iter()
+        .map(|(name, value)| {
+            let value = match value {
+                pdfium::StructureAttributeValue::Boolean(v) => StructureAttributeValue::Boolean(v),
+                pdfium::StructureAttributeValue::Number(v) => StructureAttributeValue::Number(v),
+                pdfium::StructureAttributeValue::String(v) => StructureAttributeValue::String(v),
+            };
+            (name, value)
+        })
+        .collect();
+    StructureTreeElement {
+        element_type: element.element_type,
+        id: element.id,
+        actual_text: element.actual_text,
+        alt_text: element.alt_text,
+        title: element.title,
+        attributes,
+        marked_content_ids: element.marked_content_ids,
+        children: element
+            .children
+            .into_iter()
+            .map(|child| structure_tree_element(child, annotations_by_object))
+            .collect(),
+        annotations: element
+            .annotation_object_numbers
+            .into_iter()
+            .filter_map(|number| annotations_by_object.get(&number))
+            .map(|annotation| document_annotation(annotation))
+            .collect(),
+    }
 }
 
 fn rect_from_pdfium(rect: RectF) -> Rect {
@@ -2565,6 +2625,7 @@ mod tests {
             image_refs: Vec::new(),
             annotations: None,
             form_fields: None,
+            structure_tree: None,
         }
     }
 

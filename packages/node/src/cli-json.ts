@@ -6,6 +6,7 @@ import type {
   ParseResult,
   TextItem,
   VectorGraphics,
+  StructureTreeElement,
 } from "./lib.js";
 
 function textItemToCliJson(item: TextItem) {
@@ -32,6 +33,20 @@ function textItemToCliJson(item: TextItem) {
       ? { trailing_space_generated: true }
       : {}),
     ...(item.confidence !== undefined ? { confidence: item.confidence } : {}),
+  };
+}
+
+function structureTreeElementToCliJson(element: StructureTreeElement): object {
+  return {
+    type: element.type,
+    ...(element.id !== undefined ? { id: element.id } : {}),
+    ...(element.actualText !== undefined ? { actual_text: element.actualText } : {}),
+    ...(element.altText !== undefined ? { alt_text: element.altText } : {}),
+    ...(element.title !== undefined ? { title: element.title } : {}),
+    ...(Object.keys(element.attributes).length ? { attributes: element.attributes } : {}),
+    marked_content_ids: element.markedContentIds,
+    children: element.children.map(structureTreeElementToCliJson),
+    annotations: element.annotations.map(annotationToCliJson),
   };
 }
 
@@ -196,6 +211,13 @@ export function parseResultToCliJson(result: ParseResult) {
         : {}),
       ...(page.formFields !== undefined
         ? { form_fields: page.formFields.map(formFieldToCliJson) }
+        : {}),
+      ...(page.structureTree !== undefined
+        ? {
+            structure_tree: {
+              roots: page.structureTree.roots.map(structureTreeElementToCliJson),
+            },
+          }
         : {}),
     })),
     ...(result.images.length

@@ -57,6 +57,7 @@ let config = LiteParseConfig {
     dpi: 150.0,                           // Rendering DPI
     output_format: OutputFormat::Json,    // Json | Text | Markdown
     extract_annotations: false,           // Include page annotations in output
+    extract_structure_tree: false,        // Include tagged-PDF logical structure
     preserve_very_small_text: false,      // Keep tiny text
     extract_text_metadata: false,         // Opt in to rich PDF text metadata
     password: None,                       // Password for protected documents
@@ -72,6 +73,11 @@ annotation subtype, contents, author/title, PDF date strings, viewport-space
 rectangle and quadpoint rectangles, and external link URI. It is independent
 of `extract_links`, which controls Markdown link rendering. The field is
 `None` when extraction is disabled.
+
+Set `extract_structure_tree: true` to populate `ParsedPage::structure_tree` with
+the complete tagged-PDF hierarchy: all roots, element type/ID, actual and alternate
+text, title, typed scalar attributes, MCIDs, recursive children, and referenced link
+annotations. Disabled pages use `None`; enabled untagged pages have no roots.
 
 ## Markdown Output
 

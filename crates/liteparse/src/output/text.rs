@@ -31,6 +31,7 @@ mod tests {
             complexity: None,
             annotations: None,
             form_fields: None,
+            structure_tree: None,
         }
     }
 

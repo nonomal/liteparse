@@ -35,6 +35,7 @@ export interface LiteParseNativeConfig {
   extractLinks?: boolean;
   extractAnnotations?: boolean;
   extractFormFields?: boolean;
+  extractStructureTree?: boolean;
   preserveVerySmallText?: boolean;
   password?: string;
   quiet?: boolean;
@@ -124,6 +125,30 @@ export interface NativeParsedPage {
   vectorGraphics?: NativeVectorGraphics;
   annotations?: NativeDocumentAnnotation[];
   formFields?: NativeFormField[];
+  structureTree?: NativeStructureTree;
+}
+
+export interface NativeStructureAttribute {
+  name: string;
+  booleanValue?: boolean;
+  numberValue?: number;
+  stringValue?: string;
+}
+
+export interface NativeStructureTree {
+  roots: NativeStructureTreeElement[];
+}
+
+export interface NativeStructureTreeElement {
+  elementType: string;
+  id?: string;
+  actualText?: string;
+  altText?: string;
+  title?: string;
+  attributes: NativeStructureAttribute[];
+  markedContentIds: number[];
+  children: NativeStructureTreeElement[];
+  annotations: NativeDocumentAnnotation[];
 }
 
 export interface NativeVectorGraphics {

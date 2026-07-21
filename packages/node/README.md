@@ -64,6 +64,7 @@ const parser = new LiteParse({
   extractVectorGraphics: false,  // Opt-in shapes + merged H/V lines per page
   extractAnnotations: false,     // Include page annotations in structured output
   extractFormFields: false,      // Include AcroForm widget fields and values
+  extractStructureTree: false,   // Include tagged-PDF logical structure
   preserveVerySmallText: false,  // Keep tiny text
   extractTextMetadata: false,    // Opt in to MCID, font metrics, colors, char codes, and trailingSpaceGenerated
   password: undefined,           // Password for protected documents
@@ -89,6 +90,11 @@ array containing the subtype, contents, author/title, PDF date strings,
 viewport-space rectangle and quadpoint rectangles, and URI for external link
 annotations. It is independent of `extractLinks`, which controls Markdown link
 rendering. The field is omitted when extraction is disabled.
+
+When `extractStructureTree` is enabled, each page has a `structureTree` containing
+all tagged-PDF roots and recursive elements with type, ID, actual/alternate text,
+title, typed attributes, MCIDs, children, and referenced link annotations. Untagged
+pages have an empty `roots` array; the field is omitted when disabled.
 
 ## Parsing from Bytes
 

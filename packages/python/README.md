@@ -63,6 +63,7 @@ parser = LiteParse(
     extract_vector_graphics=False, # Opt-in shapes + merged H/V lines per page
     extract_annotations=False,     # Include page annotations in structured output
     extract_form_fields=False,      # Include AcroForm widget fields and values
+    extract_structure_tree=False,   # Include tagged-PDF logical structure
     preserve_very_small_text=False, # Keep tiny text
     extract_text_metadata=False,    # Opt in to MCID, font metrics, colors, char codes, and trailing_space_generated
     password=None,                 # Password for protected documents
@@ -85,6 +86,11 @@ list containing the subtype, contents, author/title, PDF date strings,
 viewport-space rectangle and quadpoint rectangles, and URI for external link
 annotations. It is independent of `extract_links`, which controls Markdown
 link rendering. The field is `None` when extraction is disabled.
+
+When ``extract_structure_tree=True``, each page has a ``structure_tree`` containing
+all tagged-PDF roots and recursive elements with type, ID, actual/alternate text,
+title, typed attributes, MCIDs, children, and referenced link annotations. Untagged
+pages have an empty ``roots`` list; the field is ``None`` when disabled.
 
 ## Parsing from Bytes
 

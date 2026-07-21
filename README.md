@@ -197,6 +197,9 @@ lit parse document.pdf --format json --extract-images
 
 # Emit link text as plain text (no [text](url) syntax)
 lit parse document.pdf --format markdown --no-links
+
+# Include tagged-PDF logical structure in JSON
+lit parse document.pdf --format json --extract-structure-tree
 ```
 
 Image handling is controlled by `--image-mode`:
@@ -240,6 +243,15 @@ the shape rectangle `bbox` rather than PDFium's `coords`, and uses `width` /
 `height` rather than `w` / `h`. The field is absent (or `None`/`undefined`) by
 default. Diagonal and curved segments are represented by their parent shape but
 are not emitted as lines.
+
+### Tagged PDF structure tree
+
+Enable `--extract-structure-tree` (Rust/Python `extract_structure_tree`,
+JavaScript/WASM `extractStructureTree`) to add a page-scoped `structure_tree`.
+It preserves every root and recursively exposes element type, ID, actual/alternate
+text, title, typed scalar attributes, marked-content IDs, children, and referenced
+link annotations. The field is absent by default; enabled untagged pages contain
+`roots: []`.
 
 ### Check Complexity
 

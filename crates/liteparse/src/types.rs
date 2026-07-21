@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[doc(hidden)]
 #[derive(Debug, Clone)]
@@ -130,6 +130,9 @@ pub struct Page {
     /// AcroForm widgets when explicitly requested.
     #[serde(skip)]
     pub form_fields: Option<Vec<FormField>>,
+    /// Tagged-PDF logical structure when explicitly requested.
+    #[serde(skip)]
+    pub structure_tree: Option<StructureTree>,
 }
 
 /// One PDF page annotation. Coordinates use the same top-left, 72-DPI
@@ -151,6 +154,42 @@ pub struct DocumentAnnotation {
     pub quadpoint_rects: Vec<Rect>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uri: Option<String>,
+}
+
+/// Scalar value from a tagged-PDF structure element's `/A` dictionary.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(untagged)]
+pub enum StructureAttributeValue {
+    Boolean(bool),
+    Number(f32),
+    String(String),
+}
+
+/// A complete page-scoped tagged-PDF logical structure tree.
+#[derive(Debug, Clone, Serialize)]
+pub struct StructureTree {
+    pub roots: Vec<StructureTreeElement>,
+}
+
+/// One tagged-PDF structure element. Field names intentionally use the
+/// repository's snake_case JSON convention rather than PDFium's C spellings.
+#[derive(Debug, Clone, Serialize)]
+pub struct StructureTreeElement {
+    #[serde(rename = "type")]
+    pub element_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alt_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub attributes: BTreeMap<String, StructureAttributeValue>,
+    pub marked_content_ids: Vec<i32>,
+    pub children: Vec<StructureTreeElement>,
+    pub annotations: Vec<DocumentAnnotation>,
 }
 
 /// One AcroForm widget and its resolved field metadata.
@@ -271,6 +310,9 @@ pub struct ParsedPage {
     /// AcroForm widgets when `extract_form_fields` is true.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub form_fields: Option<Vec<FormField>>,
+    /// Tagged-PDF logical structure when `extract_structure_tree` is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub structure_tree: Option<StructureTree>,
 }
 
 /// One embedded raster image on a page. `id` is a stable, page-scoped slug
@@ -579,6 +621,7 @@ mod tests {
             image_refs: vec![],
             annotations: None,
             form_fields: None,
+            structure_tree: None,
         };
         let s = serde_json::to_string(&p).unwrap();
         assert!(s.contains("\"page_number\":1"));

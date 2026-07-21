@@ -402,6 +402,16 @@ pub struct PdfiumBindings {
         *mut std::os::raw::c_void,
         std::os::raw::c_ulong,
     ) -> std::os::raw::c_ulong,
+    pub FPDF_StructElement_GetActualText: unsafe extern "C" fn(
+        FPDF_STRUCTELEMENT,
+        *mut std::os::raw::c_void,
+        std::os::raw::c_ulong,
+    ) -> std::os::raw::c_ulong,
+    pub FPDF_StructElement_GetID: unsafe extern "C" fn(
+        FPDF_STRUCTELEMENT,
+        *mut std::os::raw::c_void,
+        std::os::raw::c_ulong,
+    ) -> std::os::raw::c_ulong,
     pub FPDF_StructElement_GetTitle: unsafe extern "C" fn(
         FPDF_STRUCTELEMENT,
         *mut std::os::raw::c_void,
@@ -419,6 +429,38 @@ pub struct PdfiumBindings {
         unsafe extern "C" fn(FPDF_STRUCTELEMENT) -> std::os::raw::c_int,
     pub FPDF_StructElement_GetMarkedContentIdAtIndex:
         unsafe extern "C" fn(FPDF_STRUCTELEMENT, std::os::raw::c_int) -> std::os::raw::c_int,
+    pub FPDF_StructElement_GetChildObjNum:
+        unsafe extern "C" fn(FPDF_STRUCTELEMENT, std::os::raw::c_int) -> std::os::raw::c_int,
+    pub FPDF_StructElement_GetAttributeCount:
+        unsafe extern "C" fn(FPDF_STRUCTELEMENT) -> std::os::raw::c_int,
+    pub FPDF_StructElement_GetAttributeAtIndex:
+        unsafe extern "C" fn(FPDF_STRUCTELEMENT, std::os::raw::c_int) -> FPDF_STRUCTELEMENT_ATTR,
+    pub FPDF_StructElement_Attr_GetCount:
+        unsafe extern "C" fn(FPDF_STRUCTELEMENT_ATTR) -> std::os::raw::c_int,
+    pub FPDF_StructElement_Attr_GetName: unsafe extern "C" fn(
+        FPDF_STRUCTELEMENT_ATTR,
+        std::os::raw::c_int,
+        *mut std::os::raw::c_void,
+        std::os::raw::c_ulong,
+        *mut std::os::raw::c_ulong,
+    ) -> FPDF_BOOL,
+    pub FPDF_StructElement_Attr_GetValue: unsafe extern "C" fn(
+        FPDF_STRUCTELEMENT_ATTR,
+        FPDF_BYTESTRING,
+    )
+        -> FPDF_STRUCTELEMENT_ATTR_VALUE,
+    pub FPDF_StructElement_Attr_GetType:
+        unsafe extern "C" fn(FPDF_STRUCTELEMENT_ATTR_VALUE) -> FPDF_OBJECT_TYPE,
+    pub FPDF_StructElement_Attr_GetBooleanValue:
+        unsafe extern "C" fn(FPDF_STRUCTELEMENT_ATTR_VALUE, *mut FPDF_BOOL) -> FPDF_BOOL,
+    pub FPDF_StructElement_Attr_GetNumberValue:
+        unsafe extern "C" fn(FPDF_STRUCTELEMENT_ATTR_VALUE, *mut f32) -> FPDF_BOOL,
+    pub FPDF_StructElement_Attr_GetStringValue: unsafe extern "C" fn(
+        FPDF_STRUCTELEMENT_ATTR_VALUE,
+        *mut std::os::raw::c_void,
+        std::os::raw::c_ulong,
+        *mut std::os::raw::c_ulong,
+    ) -> FPDF_BOOL,
 }
 
 // SAFETY: PdfiumBindings contains only function pointers and a Library handle.
@@ -565,6 +607,8 @@ impl PdfiumBindings {
             FPDF_StructTree_GetChildAtIndex: load_fn!(lib, "FPDF_StructTree_GetChildAtIndex"),
             FPDF_StructElement_GetType: load_fn!(lib, "FPDF_StructElement_GetType"),
             FPDF_StructElement_GetAltText: load_fn!(lib, "FPDF_StructElement_GetAltText"),
+            FPDF_StructElement_GetActualText: load_fn!(lib, "FPDF_StructElement_GetActualText"),
+            FPDF_StructElement_GetID: load_fn!(lib, "FPDF_StructElement_GetID"),
             FPDF_StructElement_GetTitle: load_fn!(lib, "FPDF_StructElement_GetTitle"),
             FPDF_StructElement_CountChildren: load_fn!(lib, "FPDF_StructElement_CountChildren"),
             FPDF_StructElement_GetChildAtIndex: load_fn!(lib, "FPDF_StructElement_GetChildAtIndex"),
@@ -583,6 +627,31 @@ impl PdfiumBindings {
             FPDF_StructElement_GetMarkedContentIdAtIndex: load_fn!(
                 lib,
                 "FPDF_StructElement_GetMarkedContentIdAtIndex"
+            ),
+            FPDF_StructElement_GetChildObjNum: load_fn!(lib, "FPDF_StructElement_GetChildObjNum"),
+            FPDF_StructElement_GetAttributeCount: load_fn!(
+                lib,
+                "FPDF_StructElement_GetAttributeCount"
+            ),
+            FPDF_StructElement_GetAttributeAtIndex: load_fn!(
+                lib,
+                "FPDF_StructElement_GetAttributeAtIndex"
+            ),
+            FPDF_StructElement_Attr_GetCount: load_fn!(lib, "FPDF_StructElement_Attr_GetCount"),
+            FPDF_StructElement_Attr_GetName: load_fn!(lib, "FPDF_StructElement_Attr_GetName"),
+            FPDF_StructElement_Attr_GetValue: load_fn!(lib, "FPDF_StructElement_Attr_GetValue"),
+            FPDF_StructElement_Attr_GetType: load_fn!(lib, "FPDF_StructElement_Attr_GetType"),
+            FPDF_StructElement_Attr_GetBooleanValue: load_fn!(
+                lib,
+                "FPDF_StructElement_Attr_GetBooleanValue"
+            ),
+            FPDF_StructElement_Attr_GetNumberValue: load_fn!(
+                lib,
+                "FPDF_StructElement_Attr_GetNumberValue"
+            ),
+            FPDF_StructElement_Attr_GetStringValue: load_fn!(
+                lib,
+                "FPDF_StructElement_Attr_GetStringValue"
             ),
 
             _lib: lib,

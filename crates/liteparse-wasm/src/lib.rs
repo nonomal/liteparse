@@ -58,6 +58,7 @@ pub struct LiteParseConfig {
     extract_links: Option<bool>,
     extract_annotations: Option<bool>,
     extract_form_fields: Option<bool>,
+    extract_structure_tree: Option<bool>,
     ocr_failure_fatal: Option<bool>,
     ocr_hedge_delays_ms: Option<Vec<u64>>,
     preserve_very_small_text: Option<bool>,
@@ -150,6 +151,9 @@ impl LiteParseConfig {
         if let Some(v) = self.extract_form_fields {
             cfg.extract_form_fields = v;
         }
+        if let Some(v) = self.extract_structure_tree {
+            cfg.extract_structure_tree = v;
+        }
         if let Some(v) = self.ocr_failure_fatal {
             cfg.ocr_failure_fatal = v;
         }
@@ -217,6 +221,7 @@ impl LiteParseConfig {
             extract_links: Some(cfg.extract_links),
             extract_annotations: Some(cfg.extract_annotations),
             extract_form_fields: Some(cfg.extract_form_fields),
+            extract_structure_tree: Some(cfg.extract_structure_tree),
             ocr_failure_fatal: Some(cfg.ocr_failure_fatal),
             ocr_hedge_delays_ms: Some(cfg.ocr_hedge_delays_ms.clone()),
             preserve_very_small_text: Some(cfg.preserve_very_small_text),

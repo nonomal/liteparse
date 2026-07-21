@@ -31,6 +31,8 @@ export interface LiteParseConfig {
   outputFormat: OutputFormat;
   /** How to surface raster images in markdown output (default: "placeholder"). */
   imageMode: ImageMode;
+  /** Directory where extracted embedded image files are written. */
+  imageOutputDir?: string;
   /** Render hyperlink annotations as `[text](url)` in markdown output (default: true). */
   extractLinks: boolean;
   preserveVerySmallText: boolean;
@@ -199,8 +201,21 @@ export interface ParsedPage {
 export interface ExtractedImage {
   /** Reference id used in the markdown output (e.g. `![](image_p1_0.png)` → `"p1_0"`). */
   id: string;
+  /** File name used when `imageOutputDir` is configured. */
+  name: string;
+  /** Written file path, absent for in-memory-only extraction. */
+  path?: string;
   page: number;
+  /** Placement on the page in viewport coordinates (top-left origin, 72 DPI). */
+  bbox: { x: number; y: number; width: number; height: number };
+  /** Intrinsic pixel dimensions of the image resource. */
+  width: number;
+  height: number;
+  /** Clockwise page-object rotation in degrees. */
+  rotation: number;
   format: string;
+  /** First occurrence with identical encoded source data, when duplicated. */
+  duplicateOf?: string;
   bytes: Buffer;
 }
 
@@ -209,6 +224,8 @@ export interface ParseResult {
   text: string;
   /** Populated only when configured with `imageMode: "embed"`. */
   images: ExtractedImage[];
+  /** Embedded image objects that PDFium could not render or encode. */
+  imageErrorCount: number;
 }
 
 export interface ScreenshotResult {
@@ -314,6 +331,7 @@ export class LiteParse {
       dpi: userConfig.dpi,
       outputFormat: userConfig.outputFormat,
       imageMode: userConfig.imageMode,
+      imageOutputDir: userConfig.imageOutputDir,
       extractLinks: userConfig.extractLinks,
       preserveVerySmallText: userConfig.preserveVerySmallText,
       password: userConfig.password,
@@ -343,6 +361,7 @@ export class LiteParse {
       dpi: resolved.dpi ?? 150,
       outputFormat: (resolved.outputFormat as OutputFormat) ?? "json",
       imageMode: (resolved.imageMode as ImageMode) ?? "placeholder",
+      imageOutputDir: resolved.imageOutputDir ?? undefined,
       extractLinks: resolved.extractLinks ?? true,
       preserveVerySmallText: resolved.preserveVerySmallText ?? false,
       password: resolved.password ?? undefined,
@@ -367,6 +386,7 @@ export class LiteParse {
       pages: result.pages.map(toPage),
       text: result.text,
       images: (result.images ?? []).map(toImage),
+      imageErrorCount: result.imageErrorCount ?? 0,
     };
   }
 
@@ -389,6 +409,7 @@ export class LiteParse {
       pages: result.pages.map(toPage),
       text: result.text,
       images: (result.images ?? []).map(toImage),
+      imageErrorCount: result.imageErrorCount ?? 0,
     };
   }
 
@@ -473,8 +494,15 @@ function toPage(p: NativeParsedPage): ParsedPage {
 function toImage(img: NativeExtractedImage): ExtractedImage {
   return {
     id: img.id,
+    name: img.name,
+    path: img.path,
     page: img.page,
+    bbox: img.bbox,
+    width: img.width,
+    height: img.height,
+    rotation: img.rotation,
     format: img.format,
+    duplicateOf: img.duplicateOf,
     bytes: img.bytes,
   };
 }

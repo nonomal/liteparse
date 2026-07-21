@@ -30,6 +30,7 @@ export interface LiteParseNativeConfig {
   dpi?: number;
   outputFormat?: string;
   imageMode?: string;
+  imageOutputDir?: string;
   extractLinks?: boolean;
   preserveVerySmallText?: boolean;
   password?: string;
@@ -120,8 +121,15 @@ export interface NativeParsedPage {
 
 export interface NativeExtractedImage {
   id: string;
+  name: string;
+  path?: string;
   page: number;
+  bbox: { x: number; y: number; width: number; height: number };
+  width: number;
+  height: number;
+  rotation: number;
   format: string;
+  duplicateOf?: string;
   bytes: Buffer;
 }
 
@@ -129,6 +137,7 @@ export interface NativeParseResult {
   pages: NativeParsedPage[];
   text: string;
   images: NativeExtractedImage[];
+  imageErrorCount: number;
 }
 
 export interface NativeScreenshotResult {

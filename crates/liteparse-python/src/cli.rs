@@ -62,13 +62,12 @@ struct ParseCommand {
     #[arg(long)]
     num_workers: Option<usize>,
     /// How to surface raster images in markdown output: `off`, `placeholder`
-    /// (default), or `embed` (extracts PNG bytes, written next to the output
-    /// when `--image-output-dir` is set).
+    /// (default), or `embed` (extracts image bytes and metadata).
     #[arg(long, default_value = "placeholder")]
     image_mode: String,
-    /// Directory to write embedded images to when `--image-mode embed` is set.
-    /// Each image is written as `image_{id}.png` to match the markdown
-    /// references. Created if missing.
+    /// Directory to write embedded images to. Valid source JPEGs keep their
+    /// format; other images are PNG. Setting this enables extraction
+    /// independently of image mode. Created if missing.
     #[arg(long)]
     image_output_dir: Option<String>,
     /// Disable hyperlink extraction. By default URI link annotations render as
@@ -234,6 +233,7 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 ocr_server_url: cmd.ocr_server_url,
                 ocr_server_headers: cmd.ocr_server_headers,
                 image_mode,
+                image_output_dir: cmd.image_output_dir.clone(),
                 extract_links: !cmd.no_links,
                 include_complexity: cmd.complexity,
                 include_text_metadata: cmd.include_text_metadata,
@@ -249,29 +249,15 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 rt.block_on(lp.parse(&cmd.file))?
             };
             let formatted = match lp.config().output_format {
-                OutputFormat::Json => json::format_json_with_text_metadata(
+                OutputFormat::Json => json::format_json_result(
                     &result.pages,
+                    &result.images,
+                    result.image_error_count,
                     lp.config().include_text_metadata,
                 )?,
                 OutputFormat::Text => text::format_text(&result.pages),
                 OutputFormat::Markdown => result.text.clone(),
             };
-            if let Some(dir) = cmd.image_output_dir.as_deref()
-                && !result.images.is_empty()
-            {
-                std::fs::create_dir_all(dir)?;
-                for img in &result.images {
-                    let path = format!("{}/image_{}.{}", dir, img.id, img.format);
-                    std::fs::write(&path, &img.bytes)?;
-                }
-                if !cmd.quiet {
-                    eprintln!(
-                        "[liteparse] wrote {} image(s) to {}",
-                        result.images.len(),
-                        dir
-                    );
-                }
-            }
             match cmd.output {
                 Some(path) => {
                     std::fs::write(&path, &formatted)?;
@@ -381,8 +367,10 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     Ok(result) => {
                         let fmt_result: Result<String, Box<dyn std::error::Error>> =
                             match lp.config().output_format {
-                                OutputFormat::Json => json::format_json_with_text_metadata(
+                                OutputFormat::Json => json::format_json_result(
                                     &result.pages,
+                                    &result.images,
+                                    result.image_error_count,
                                     lp.config().include_text_metadata,
                                 )
                                 .map_err(|e| e.into()),

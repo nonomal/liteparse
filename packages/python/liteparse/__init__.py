@@ -3,6 +3,7 @@ from importlib.metadata import PackageNotFoundError, version
 from .parser import LiteParse, search_items
 from .types import (
     ExtractedImage,
+    ImageRect,
     LayoutComplexityStats,
     LiteParseConfig,
     PageComplexityStats,
@@ -29,6 +30,7 @@ __all__ = [
     "PageComplexityStats",
     "LayoutComplexityStats",
     "ExtractedImage",
+    "ImageRect",
     "ParseError",
     "search_items",
 ]

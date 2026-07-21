@@ -63,7 +63,7 @@ pub struct TextItem {
     /// Whether the trailing source space was synthesized by PDFium rather than
     /// represented by a real space glyph in the PDF content stream.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub tsg: bool,
+    pub trailing_space_generated: bool,
     /// OCR confidence score (0.0–1.0). None for native PDF text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
@@ -254,8 +254,8 @@ pub struct ImageRef {
 }
 
 /// A raster image extracted from a page along with its pixel bytes. Surfaced
-/// on `ParseResult.images` only when `ImageMode::Embed` is configured —
-/// otherwise the extraction step skips the render and only `ImageRef`s are
+/// on `ParseResult.images` only when `extract_images` is enabled — otherwise
+/// the extraction step skips the render and only `ImageRef`s are
 /// produced. Other images are encoded as PNG from PDFium's rendered bitmap.
 /// JPEG streams are preserved without re-encoding when PDFium
 /// exposes a valid directly decoded DCT stream.

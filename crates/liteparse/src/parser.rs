@@ -26,7 +26,7 @@ pub struct ParseResult {
     /// emitter as a high-priority heading source on untagged PDFs.
     pub outline: Vec<OutlineTarget>,
     /// Raster images extracted from the document. Empty unless the parser
-    /// was configured with `ImageMode::Embed`. Each entry carries the same
+    /// was configured with `extract_images`. Each entry carries the same
     /// `id` and `format` the markdown emitter referenced, so the caller can
     /// match them up without parsing markdown.
     pub images: Vec<ExtractedImage>,
@@ -50,12 +50,6 @@ pub struct ScreenshotResult {
 /// recovered without any extra wiring. Unset (default) leaves the hook dormant.
 #[cfg(not(target_arch = "wasm32"))]
 const FONT_DB_DIR_ENV: &str = "LITEPARSE_FONT_DB_DIR";
-
-fn should_extract_images(config: &LiteParseConfig) -> bool {
-    config.extract_images
-        || matches!(config.image_mode, crate::config::ImageMode::Embed)
-        || config.image_output_dir.is_some()
-}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn write_extracted_images(
@@ -167,6 +161,15 @@ impl LiteParse {
             .map_err(|e| format!("invalid --target-pages: {}", e).into())
     }
 
+    fn validate_output_config(&self) -> Result<(), LiteParseError> {
+        if self.config.image_output_dir.is_some() && !self.config.extract_images {
+            return Err(LiteParseError::Config(
+                "image_output_dir requires extract_images = true".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Determine the complexity of each page in a document, returning a vector
     /// of `PageComplexityStats` for each page. This is useful for deciding
     /// whether to enable OCR on a per-page basis, or for other heuristics.
@@ -211,7 +214,6 @@ impl LiteParse {
                 &document,
                 target_pages.as_deref(),
                 self.config.max_pages,
-                false, // render_images: image rasters not needed for complexity
                 false, // extract_links: irrelevant for complexity stats
                 self.glyph_resolver.as_deref(),
                 extract::ExtractionOutputOptions::default(),
@@ -285,6 +287,8 @@ impl LiteParse {
 
         let t0 = web_time::Instant::now();
 
+        self.validate_output_config()?;
+
         #[cfg(not(target_arch = "wasm32"))]
         let (validated_input, _guard) =
             conversion::resolve_pdf_input(input, self.config.password.as_deref(), false).await?;
@@ -301,8 +305,6 @@ impl LiteParse {
         // projection (pure Rust) do not touch PDFium, so they can run
         // concurrently with other `LiteParse` calls.
         let password = self.config.password.as_deref();
-        let render_images = should_extract_images(&self.config);
-
         // Build the OCR engine up front so the renderer knows whether to emit a
         // grayscale buffer (cheaper, for engines that binarize internally) or RGB.
         let ocr_engine: Option<std::sync::Arc<dyn OcrEngine>> = if self.config.ocr_enabled {
@@ -349,6 +351,7 @@ impl LiteParse {
         };
         let ocr_grayscale = ocr_engine.as_ref().is_some_and(|e| e.prefers_grayscale());
 
+        #[allow(unused_mut)] // mutated only by the native image-output writer
         let (pages, ocr_rendered, outline, mut images, image_error_count, complexity) = {
             let lib = Library::init();
             let document = extract::load_document_from_input(&lib, &validated_input, password)?;
@@ -357,12 +360,13 @@ impl LiteParse {
                 &document,
                 target_pages.as_deref(),
                 self.config.max_pages,
-                render_images,
                 self.config.extract_links
                     && self.config.output_format == crate::config::OutputFormat::Markdown,
                 self.glyph_resolver.as_deref(),
                 extract::ExtractionOutputOptions {
+                    extract_images: self.config.extract_images,
                     emit_word_boxes: self.config.emit_word_boxes,
+                    extract_text_metadata: self.config.extract_text_metadata,
                     extract_vector_graphics: self.config.extract_vector_graphics,
                     extract_annotations: self.config.extract_annotations,
                 },
@@ -481,15 +485,13 @@ impl LiteParse {
                 .join("\n\n")
         };
 
-        if !self.config.include_text_metadata {
-            strip_text_metadata(&mut parsed_pages);
-        }
-
         let total = web_time::Instant::now().duration_since(t0).as_secs_f64() * 1000.0;
         log(&format!("[liteparse] total: {:.1}ms", total));
 
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(output_dir) = self.config.image_output_dir.as_deref() {
+        if self.config.extract_images
+            && let Some(output_dir) = self.config.image_output_dir.as_deref()
+        {
             write_extracted_images(output_dir, &mut images)?;
         }
 
@@ -528,10 +530,6 @@ impl LiteParse {
                 .collect::<Vec<_>>()
                 .join("\n\n")
         };
-
-        if !self.config.include_text_metadata {
-            strip_text_metadata(&mut parsed_pages);
-        }
 
         ParseResult {
             pages: parsed_pages,
@@ -602,26 +600,6 @@ impl LiteParse {
     }
 }
 
-/// Remove opt-in extraction metadata only after projection/Markdown have had
-/// access to it. Longstanding lightweight fields (text, bbox, rotation,
-/// font name/size, confidence, links, strike state, and optional word boxes)
-/// remain unchanged.
-fn strip_text_metadata(pages: &mut [crate::types::ParsedPage]) {
-    for item in pages.iter_mut().flat_map(|page| &mut page.text_items) {
-        item.font_height = None;
-        item.font_ascent = None;
-        item.font_descent = None;
-        item.font_weight = None;
-        item.text_width = None;
-        item.font_is_buggy = false;
-        item.mcid = None;
-        item.fill_color = None;
-        item.stroke_color = None;
-        item.char_codes.clear();
-        item.tsg = false;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -648,12 +626,14 @@ mod tests {
                 fill_color: Some("ff112233".into()),
                 stroke_color: Some("ff445566".into()),
                 char_codes: vec![104, 101, 108, 108, 111],
-                tsg: true,
+                trailing_space_generated: true,
                 ..Default::default()
             }],
             graphics: vec![],
+            vector_graphics: None,
             struct_nodes: vec![],
             image_refs: vec![],
+            annotations: None,
         }
     }
 
@@ -669,29 +649,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_result_strips_text_metadata_by_default() {
+    fn parse_from_pages_preserves_internal_text_metadata() {
         let result = LiteParse::new(LiteParseConfig::default())
             .parse_from_pages(vec![page_with_text_metadata()], vec![]);
         let item = &result.pages[0].text_items[0];
         assert_eq!(item.font_name.as_deref(), Some("Helvetica"));
         assert_eq!(item.font_size, Some(10.0));
-        assert_eq!(item.font_height, None);
-        assert_eq!(item.font_weight, None);
-        assert_eq!(item.mcid, None);
-        assert!(item.char_codes.is_empty());
-        assert!(!item.font_is_buggy);
-        assert!(!item.tsg);
-    }
-
-    #[test]
-    fn parse_result_preserves_text_metadata_when_enabled() {
-        let config = LiteParseConfig {
-            include_text_metadata: true,
-            ..Default::default()
-        };
-        let result =
-            LiteParse::new(config).parse_from_pages(vec![page_with_text_metadata()], vec![]);
-        let item = &result.pages[0].text_items[0];
         assert_eq!(item.font_height, Some(10.0));
         assert_eq!(item.font_ascent, Some(8.0));
         assert_eq!(item.font_descent, Some(-2.0));
@@ -702,31 +665,34 @@ mod tests {
         assert_eq!(item.fill_color.as_deref(), Some("ff112233"));
         assert_eq!(item.stroke_color.as_deref(), Some("ff445566"));
         assert_eq!(item.char_codes, vec![104, 101, 108, 108, 111]);
-        assert!(item.tsg);
+        assert!(item.trailing_space_generated);
     }
 
     #[test]
-    fn image_extraction_is_opt_in_with_compatibility_implications() {
-        let default = LiteParseConfig::default();
-        assert!(!should_extract_images(&default));
-
-        let explicit = LiteParseConfig {
+    fn image_extraction_is_explicitly_opt_in() {
+        let options = extract::ExtractionOutputOptions {
             extract_images: true,
             ..Default::default()
         };
-        assert!(should_extract_images(&explicit));
+        assert!(options.extract_images);
 
         let embed = LiteParseConfig {
             image_mode: crate::config::ImageMode::Embed,
             ..Default::default()
         };
-        assert!(should_extract_images(&embed));
+        assert!(!embed.extract_images);
+    }
 
-        let output_dir = LiteParseConfig {
+    #[test]
+    fn image_output_dir_requires_image_extraction() {
+        let parser = LiteParse::new(LiteParseConfig {
             image_output_dir: Some("images".into()),
             ..Default::default()
-        };
-        assert!(should_extract_images(&output_dir));
+        });
+        assert_eq!(
+            parser.validate_output_config().unwrap_err().to_string(),
+            "invalid config: image_output_dir requires extract_images = true"
+        );
     }
 
     #[test]

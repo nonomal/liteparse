@@ -2,6 +2,7 @@
 
 import { program } from "commander";
 import { LiteParse, type LiteParseConfig } from "./lib.js";
+import { parseResultToCliJson } from "./cli-json.js";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { join, relative, parse as parsePath } from "node:path";
 
@@ -81,7 +82,7 @@ program
   .option("--dpi <dpi>", "Rendering DPI", parseFloat)
   .option("--preserve-small-text", "Keep very small text")
   .option(
-    "--include-text-metadata",
+    "--extract-text-metadata",
     "Include rich PDF text metadata in text items and JSON output",
   )
   .option("--password <password>", "Password for encrypted documents")
@@ -127,7 +128,7 @@ program
       if (opts.targetPages) config.targetPages = opts.targetPages as string;
       if (opts.dpi) config.dpi = opts.dpi as number;
       if (opts.preserveSmallText) config.preserveVerySmallText = true;
-      if (opts.includeTextMetadata) config.includeTextMetadata = true;
+      if (opts.extractTextMetadata) config.extractTextMetadata = true;
       if (opts.password) config.password = opts.password as string;
       if (opts.quiet) config.quiet = true;
       if (opts.numWorkers) config.numWorkers = opts.numWorkers as number;
@@ -143,19 +144,7 @@ program
       const output =
         config.outputFormat === "json"
           ? JSON.stringify(
-              {
-                pages: result.pages.map((p) => ({
-                  page: p.pageNum,
-                  width: p.width,
-                  height: p.height,
-                  text: p.text,
-                  textItems: p.textItems,
-                  ...(p.vectorGraphics ? { vectorGraphics: p.vectorGraphics } : {}),
-                  ...(p.annotations ? { annotations: p.annotations } : {}),
-                })),
-                images: result.images.map(({ bytes: _bytes, ...image }) => image),
-                imageErrorCount: result.imageErrorCount,
-              },
+              parseResultToCliJson(result),
               null,
               2,
             )
@@ -322,10 +311,11 @@ program
   .option("-q, --quiet", "Suppress progress output")
   .option("--num-workers <n>", "Number of concurrent OCR workers", parseInt)
   .option(
-    "--include-text-metadata",
+    "--extract-text-metadata",
     "Include rich PDF text metadata in text items and JSON output",
   )
   .option("--extract-images", "Extract embedded image bytes and metadata")
+  .option("--extract-annotations", "Include all PDF annotations in page output")
   .option(
     "--extract-vector-graphics",
     "Include page-scoped vector shapes and merged horizontal/vertical lines",
@@ -351,8 +341,9 @@ program
         if (opts.password) config.password = opts.password as string;
         if (opts.quiet) config.quiet = true;
         if (opts.numWorkers) config.numWorkers = opts.numWorkers as number;
-        if (opts.includeTextMetadata) config.includeTextMetadata = true;
+        if (opts.extractTextMetadata) config.extractTextMetadata = true;
         if (opts.extractImages) config.extractImages = true;
+        if (opts.extractAnnotations) config.extractAnnotations = true;
         if (opts.extractVectorGraphics) config.extractVectorGraphics = true;
 
         const parser = new LiteParse(config);
@@ -403,18 +394,7 @@ program
             const output =
               format === "json"
                 ? JSON.stringify(
-                    {
-                      pages: result.pages.map((p) => ({
-                        page: p.pageNum,
-                        width: p.width,
-                        height: p.height,
-                        text: p.text,
-                        textItems: p.textItems,
-                        ...(p.vectorGraphics ? { vectorGraphics: p.vectorGraphics } : {}),
-                      })),
-                      images: result.images.map(({ bytes: _bytes, ...image }) => image),
-                      imageErrorCount: result.imageErrorCount,
-                    },
+                    parseResultToCliJson(result),
                     null,
                     2,
                   )

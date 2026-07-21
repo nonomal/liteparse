@@ -44,12 +44,12 @@ pub struct JsLiteParseConfig {
     pub num_workers: Option<u32>,
     /// How to surface raster images in markdown output: "off", "placeholder"
     /// (default — emits `![](image_pN_K.png)` references with no bytes), or
-    /// "embed" (also returns each image's bytes and metadata on `images`).
+    /// "embed" (same presentation as placeholder; extraction is independent).
     pub image_mode: Option<String>,
     /// Extract embedded image bytes and metadata (default false).
     pub extract_images: Option<bool>,
-    /// Directory where embedded image files are written. Also enables image
-    /// extraction even when `imageMode` is `placeholder`.
+    /// Directory where embedded image files are written. Requires
+    /// `extractImages` to be true.
     pub image_output_dir: Option<String>,
     /// Render hyperlink annotations as `[text](url)` in markdown output
     /// (default true). Set false for plain anchor text.
@@ -69,7 +69,7 @@ pub struct JsLiteParseConfig {
     /// for word-level bbox attribution.
     pub emit_word_boxes: Option<bool>,
     /// Include rich PDF text metadata on returned text items. Default false.
-    pub include_text_metadata: Option<bool>,
+    pub extract_text_metadata: Option<bool>,
     /// Restrict output to a page sub-region. Each field is the fraction of the
     /// page cropped from that side; a text item survives only if it lies
     /// entirely inside the remaining rectangle. Unset keeps the whole page.
@@ -170,8 +170,8 @@ impl JsLiteParseConfig {
         if let Some(v) = self.emit_word_boxes {
             cfg.emit_word_boxes = v;
         }
-        if let Some(v) = self.include_text_metadata {
-            cfg.include_text_metadata = v;
+        if let Some(v) = self.extract_text_metadata {
+            cfg.extract_text_metadata = v;
         }
         if let Some(v) = self.crop_box {
             cfg.crop_box = Some(CropBox {
@@ -233,7 +233,7 @@ impl JsLiteParseConfig {
                     .collect(),
             ),
             emit_word_boxes: Some(cfg.emit_word_boxes),
-            include_text_metadata: Some(cfg.include_text_metadata),
+            extract_text_metadata: Some(cfg.extract_text_metadata),
             crop_box: cfg.crop_box.map(|c| JsCropBox {
                 top: c.top as f64,
                 right: c.right as f64,
@@ -298,7 +298,7 @@ pub struct JsTextItem {
     /// Raw PDF content-stream character codes for the source glyphs.
     pub char_codes: Option<Vec<u32>>,
     /// True when the trailing source space was synthesized by PDFium.
-    pub tsg: Option<bool>,
+    pub trailing_space_generated: Option<bool>,
     pub confidence: Option<f64>,
     /// Rotation in degrees (viewport space). Defaults to 0 when omitted.
     pub rotation: Option<f64>,
@@ -328,7 +328,7 @@ impl JsTextItem {
             fill_color: self.fill_color.clone(),
             stroke_color: self.stroke_color.clone(),
             char_codes: self.char_codes.clone().unwrap_or_default(),
-            tsg: self.tsg.unwrap_or(false),
+            trailing_space_generated: self.trailing_space_generated.unwrap_or(false),
             confidence: self.confidence.map(|v| v as f32),
             ..Default::default()
         }
@@ -354,15 +354,15 @@ impl JsTextItem {
             fill_color: item.fill_color.clone(),
             stroke_color: item.stroke_color.clone(),
             char_codes: Some(item.char_codes.clone()),
-            tsg: Some(item.tsg),
+            trailing_space_generated: Some(item.trailing_space_generated),
             confidence: item.confidence.map(|v| v as f64).or(Some(1.0)),
             words: item.words.iter().map(JsWordBox::from_rust).collect(),
         }
     }
 
-    fn from_rust_for_output(item: &TextItem, include_text_metadata: bool) -> Self {
+    fn from_rust_for_output(item: &TextItem, extract_text_metadata: bool) -> Self {
         let mut output = Self::from_rust(item);
-        if !include_text_metadata {
+        if !extract_text_metadata {
             output.font_height = None;
             output.font_ascent = None;
             output.font_descent = None;
@@ -373,7 +373,7 @@ impl JsTextItem {
             output.fill_color = None;
             output.stroke_color = None;
             output.char_codes = None;
-            output.tsg = None;
+            output.trailing_space_generated = None;
         }
         output
     }
@@ -639,7 +639,7 @@ impl JsDocumentAnnotation {
 }
 
 impl JsParsedPage {
-    pub fn from_rust(page: &ParsedPage, include_text_metadata: bool) -> Self {
+    pub fn from_rust(page: &ParsedPage, extract_text_metadata: bool) -> Self {
         Self {
             page_num: page.page_number as u32,
             width: page.page_width as f64,
@@ -649,7 +649,7 @@ impl JsParsedPage {
             text_items: page
                 .text_items
                 .iter()
-                .map(|item| JsTextItem::from_rust_for_output(item, include_text_metadata))
+                .map(|item| JsTextItem::from_rust_for_output(item, extract_text_metadata))
                 .collect(),
             complexity: page
                 .complexity
@@ -805,7 +805,7 @@ impl JsParseResult {
             pages: result
                 .pages
                 .iter()
-                .map(|page| JsParsedPage::from_rust(page, config.include_text_metadata))
+                .map(|page| JsParsedPage::from_rust(page, config.extract_text_metadata))
                 .collect(),
             text: result.text.clone(),
             image_error_count: result.image_error_count,
@@ -853,20 +853,20 @@ mod tests {
             fill_color: Some("ff112233".into()),
             stroke_color: Some("ff445566".into()),
             char_codes: vec![65, 32],
-            tsg: true,
+            trailing_space_generated: true,
             ..Default::default()
         };
 
         let js = JsTextItem::from_rust(&item);
         assert_eq!(js.char_codes, Some(vec![65, 32]));
-        assert_eq!(js.tsg, Some(true));
+        assert_eq!(js.trailing_space_generated, Some(true));
         assert_eq!(js.fill_color.as_deref(), Some("ff112233"));
 
         let lightweight = JsTextItem::from_rust_for_output(&item, false);
         assert_eq!(lightweight.font_height, None);
         assert_eq!(lightweight.font_is_buggy, None);
         assert_eq!(lightweight.char_codes, None);
-        assert_eq!(lightweight.tsg, None);
+        assert_eq!(lightweight.trailing_space_generated, None);
 
         let round_trip = js.to_rust();
         assert_eq!(round_trip.font_height, Some(12.0));
@@ -878,15 +878,15 @@ mod tests {
         assert_eq!(round_trip.mcid, Some(2));
         assert_eq!(round_trip.stroke_color.as_deref(), Some("ff445566"));
         assert_eq!(round_trip.char_codes, vec![65, 32]);
-        assert!(round_trip.tsg);
+        assert!(round_trip.trailing_space_generated);
     }
 
     #[test]
     fn text_metadata_config_defaults_off_and_round_trips() {
         let mut js = JsLiteParseConfig::from_rust(&LiteParseConfig::default());
-        assert_eq!(js.include_text_metadata, Some(false));
-        js.include_text_metadata = Some(true);
-        assert!(js.into_rust().include_text_metadata);
+        assert_eq!(js.extract_text_metadata, Some(false));
+        js.extract_text_metadata = Some(true);
+        assert!(js.into_rust().extract_text_metadata);
     }
 
     #[test]

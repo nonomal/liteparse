@@ -36,7 +36,7 @@ pub(crate) struct JsonTextItem {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub char_codes: Vec<u32>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub tsg: bool,
+    pub trailing_space_generated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
 }
@@ -86,7 +86,7 @@ pub(crate) struct JsonImage {
 }
 
 /// Build structured JSON output from parsed pages.
-pub(crate) fn build_json(pages: &[ParsedPage], include_text_metadata: bool) -> ParseResultJson {
+pub(crate) fn build_json(pages: &[ParsedPage], extract_text_metadata: bool) -> ParseResultJson {
     ParseResultJson {
         images: Vec::new(),
         image_error_count: 0,
@@ -106,28 +106,29 @@ pub(crate) fn build_json(pages: &[ParsedPage], include_text_metadata: bool) -> P
                         y: item.y,
                         width: item.width,
                         height: item.height,
-                        rotation: include_text_metadata.then_some(item.rotation),
+                        rotation: Some(item.rotation),
                         font_name: item.font_name.clone(),
                         font_size: item.font_size,
-                        font_height: include_text_metadata.then_some(item.font_height).flatten(),
-                        font_ascent: include_text_metadata.then_some(item.font_ascent).flatten(),
-                        font_descent: include_text_metadata.then_some(item.font_descent).flatten(),
-                        font_weight: include_text_metadata.then_some(item.font_weight).flatten(),
-                        text_width: include_text_metadata.then_some(item.text_width).flatten(),
-                        font_is_buggy: include_text_metadata.then_some(item.font_is_buggy),
-                        mcid: include_text_metadata.then_some(item.mcid).flatten(),
-                        fill_color: include_text_metadata
+                        font_height: extract_text_metadata.then_some(item.font_height).flatten(),
+                        font_ascent: extract_text_metadata.then_some(item.font_ascent).flatten(),
+                        font_descent: extract_text_metadata.then_some(item.font_descent).flatten(),
+                        font_weight: extract_text_metadata.then_some(item.font_weight).flatten(),
+                        text_width: extract_text_metadata.then_some(item.text_width).flatten(),
+                        font_is_buggy: extract_text_metadata.then_some(item.font_is_buggy),
+                        mcid: extract_text_metadata.then_some(item.mcid).flatten(),
+                        fill_color: extract_text_metadata
                             .then(|| item.fill_color.clone())
                             .flatten(),
-                        stroke_color: include_text_metadata
+                        stroke_color: extract_text_metadata
                             .then(|| item.stroke_color.clone())
                             .flatten(),
-                        char_codes: if include_text_metadata {
+                        char_codes: if extract_text_metadata {
                             item.char_codes.clone()
                         } else {
                             Vec::new()
                         },
-                        tsg: include_text_metadata && item.tsg,
+                        trailing_space_generated: extract_text_metadata
+                            && item.trailing_space_generated,
                         confidence: item.confidence.or(Some(1.0)),
                     })
                     .collect(),
@@ -145,9 +146,9 @@ pub fn format_json_result(
     pages: &[ParsedPage],
     images: &[ExtractedImage],
     image_error_count: u32,
-    include_text_metadata: bool,
+    extract_text_metadata: bool,
 ) -> Result<String, serde_json::Error> {
-    let mut result = build_json(pages, include_text_metadata);
+    let mut result = build_json(pages, extract_text_metadata);
     result.images = images
         .iter()
         .map(|image| JsonImage {
@@ -175,9 +176,9 @@ pub fn format_json(pages: &[ParsedPage]) -> Result<String, serde_json::Error> {
 /// Format parsed pages as JSON, optionally including rich PDF text metadata.
 pub fn format_json_with_text_metadata(
     pages: &[ParsedPage],
-    include_text_metadata: bool,
+    extract_text_metadata: bool,
 ) -> Result<String, serde_json::Error> {
-    let result = build_json(pages, include_text_metadata);
+    let result = build_json(pages, extract_text_metadata);
     serde_json::to_string_pretty(&result)
 }
 
@@ -256,7 +257,7 @@ mod tests {
         text_item.fill_color = Some("ff112233".into());
         text_item.stroke_color = Some("ff445566".into());
         text_item.char_codes = vec![104, 105, 32];
-        text_item.tsg = true;
+        text_item.trailing_space_generated = true;
 
         let value: serde_json::Value = serde_json::from_str(
             &format_json_with_text_metadata(&[page(vec![text_item])], true).unwrap(),
@@ -273,7 +274,7 @@ mod tests {
         assert_eq!(item["fill_color"], "ff112233");
         assert_eq!(item["stroke_color"], "ff445566");
         assert_eq!(item["char_codes"], serde_json::json!([104, 105, 32]));
-        assert_eq!(item["tsg"], true);
+        assert_eq!(item["trailing_space_generated"], true);
         assert_eq!(item["rotation"], 0.0);
     }
 
@@ -290,17 +291,17 @@ mod tests {
         text_item.font_is_buggy = true;
         text_item.mcid = Some(4);
         text_item.char_codes = vec![104, 105];
-        text_item.tsg = true;
+        text_item.trailing_space_generated = true;
 
         let value: serde_json::Value =
             serde_json::from_str(&format_json(&[page(vec![text_item])]).unwrap()).unwrap();
         let item = &value["pages"][0]["text_items"][0];
-        assert!(item.get("rotation").is_none());
+        assert_eq!(item["rotation"], 0.0);
         assert!(item.get("font_height").is_none());
         assert!(item.get("font_is_buggy").is_none());
         assert!(item.get("mcid").is_none());
         assert!(item.get("char_codes").is_none());
-        assert!(item.get("tsg").is_none());
+        assert!(item.get("trailing_space_generated").is_none());
     }
 
     #[test]

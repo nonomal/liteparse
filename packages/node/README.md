@@ -64,20 +64,24 @@ const parser = new LiteParse({
   extractVectorGraphics: false,  // Opt-in shapes + merged H/V lines per page
   extractAnnotations: false,     // Include page annotations in structured output
   preserveVerySmallText: false,  // Keep tiny text
-  includeTextMetadata: false,    // Opt in to MCID, font metrics, colors, char codes, and tsg
+  extractTextMetadata: false,    // Opt in to MCID, font metrics, colors, char codes, and trailingSpaceGenerated
   password: undefined,           // Password for protected documents
   quiet: false,                  // Suppress progress output
   numWorkers: 4,                 // Concurrent OCR workers
 });
 ```
 
-When `imageOutputDir` is set, image extraction is enabled automatically. Each
+When `extractImages` is true, image extraction is enabled. `imageOutputDir` requires
+that explicit opt-in and writes the extracted bytes to disk. Each
 `result.images` entry includes its page bbox, intrinsic pixel dimensions, rotation,
 format, `name`, and `path`. Valid source JPEGs are preserved, exact duplicates reuse
 one file, and JSON CLI output contains metadata only—never base64 image data.
-`imageMode: "embed"` also continues to imply extraction. With the defaults
-(`imageMode: "placeholder"`, `extractImages: false`), only lightweight Markdown
-placement refs are collected and `result.images` stays empty.
+`imageMode` controls Markdown presentation only and does not imply extraction. With
+`extractImages: false`, lightweight Markdown placement refs are still collected and
+`result.images` stays empty.
+
+The Node CLI uses the same snake_case JSON schema as the Rust CLI; camelCase is
+reserved for the programmatic Node API.
 
 When `extractAnnotations` is enabled, each parsed page has an `annotations`
 array containing the subtype, contents, author/title, PDF date strings,

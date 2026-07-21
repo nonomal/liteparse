@@ -82,7 +82,7 @@ def _convert_native_result(native_result: Any) -> ParseResult:
                 fill_color=getattr(item, "fill_color", None),
                 stroke_color=getattr(item, "stroke_color", None),
                 char_codes=list(getattr(item, "char_codes", [])),
-                tsg=getattr(item, "tsg", False),
+                trailing_space_generated=getattr(item, "trailing_space_generated", False),
                 confidence=item.confidence,
                 rotation=getattr(item, "rotation", 0.0),
                 words=[
@@ -247,7 +247,7 @@ class LiteParse:
         ocr_failure_fatal: Optional[bool] = None,
         ocr_hedge_delays_ms: Optional[List[int]] = None,
         emit_word_boxes: Optional[bool] = None,
-        include_text_metadata: Optional[bool] = None,
+        extract_text_metadata: Optional[bool] = None,
         crop_box: Optional[Tuple[float, float, float, float]] = None,
         skip_diagonal_text: Optional[bool] = None,
         include_complexity: Optional[bool] = None,
@@ -274,11 +274,11 @@ class LiteParse:
             extract_links: Render hyperlink annotations as ``[text](url)`` in
                 markdown output (default: True). Set False for plain anchor text.
             image_output_dir: Directory where extracted embedded images are
-                written. Setting it enables image extraction and returns file
+                written. Requires ``extract_images=True`` and returns file
                 names/paths in each ``ExtractedImage``.
             extract_images: Extract embedded image bytes and metadata. Defaults
-                to False; ``image_mode="embed"`` and ``image_output_dir`` also
-                imply extraction for compatibility.
+                to False. This is the only option that enables extraction;
+                ``image_mode`` controls Markdown presentation independently.
             extract_annotations: Include all PDF annotations as page-scoped
                 structured data (default: False).
             ocr_failure_fatal: Whether a systemic OCR failure (every OCR task
@@ -296,9 +296,9 @@ class LiteParse:
                 (``TextItem.words``). Default False. Word boxes roughly double
                 the text-item payload, so enable only for word-level bbox
                 attribution.
-            include_text_metadata: Include rich PDF text metadata on returned
+            extract_text_metadata: Include rich PDF text metadata on returned
                 text items (MCID, glyph width, font metrics/weight/buggy state,
-                colors, raw character codes, and ``tsg``). Default False.
+                colors, raw character codes, and ``trailing_space_generated``). Default False.
             crop_box: Restrict output to a page sub-region, as a
                 ``(top, right, bottom, left)`` tuple where each value is the
                 fraction cropped from that side (top-left origin, each in
@@ -359,8 +359,8 @@ class LiteParse:
             kwargs["ocr_hedge_delays_ms"] = ocr_hedge_delays_ms
         if emit_word_boxes is not None:
             kwargs["emit_word_boxes"] = emit_word_boxes
-        if include_text_metadata is not None:
-            kwargs["include_text_metadata"] = include_text_metadata
+        if extract_text_metadata is not None:
+            kwargs["extract_text_metadata"] = extract_text_metadata
         if crop_box is not None:
             kwargs["crop_box"] = crop_box
         if skip_diagonal_text is not None:
@@ -511,7 +511,7 @@ class LiteParse:
             crop_box=cfg.crop_box,
             skip_diagonal_text=cfg.skip_diagonal_text,
             include_complexity=cfg.include_complexity,
-            include_text_metadata=cfg.include_text_metadata,
+            extract_text_metadata=cfg.extract_text_metadata,
             extract_images=cfg.extract_images,
             extract_vector_graphics=cfg.extract_vector_graphics,
         )

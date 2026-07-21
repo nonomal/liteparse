@@ -162,6 +162,9 @@ lit parse document.pdf --no-ocr
 # Include page-scoped vector path data in JSON
 lit parse document.pdf --format json --extract-vector-graphics
 
+# Include rich per-item PDF text metadata
+lit parse document.pdf --format json --extract-text-metadata
+
 # Include page annotations in structured JSON
 lit parse document.pdf --format json --extract-annotations
 
@@ -184,7 +187,7 @@ lit parse document.pdf --format markdown -o output.md
 lit parse document.pdf --format markdown --image-mode off
 
 # Extract embedded images to disk and reference them from the markdown
-lit parse document.pdf --format markdown --image-mode embed --image-output-dir ./images
+lit parse document.pdf --format markdown --image-mode embed --extract-images --image-output-dir ./images
 
 # Extract image bytes and metadata without changing Markdown image handling
 lit parse document.pdf --format json --extract-images
@@ -199,17 +202,17 @@ Image handling is controlled by `--image-mode`:
 |------|----------|
 | `placeholder` (default) | Emits `![](image_pN_K.png)` references in reading order |
 | `off` | Strips images entirely |
-| `embed` | Returns image bytes and metadata; valid embedded JPEG streams remain JPEG |
+| `embed` | Emits the same image references as `placeholder` |
 
-`--image-output-dir` enables extraction independently of the Markdown mode. JSON output
+`--extract-images` is the only option that enables embedded-image extraction.
+`--image-output-dir` requires it and writes the extracted bytes to disk. JSON output
 contains each image's `name`, `path`, page bbox, intrinsic pixel dimensions, rotation,
 format, and duplicate relationship; pixel bytes are never embedded in JSON. Identical
 image resources reuse the same output file.
 
 Library callers can opt in with `extract_images: true` (Rust), `extractImages: true`
-(Node/WASM), or `extract_images=True` (Python). It defaults to false. For backward
-compatibility, `image_mode=embed` and a configured image output directory also imply
-extraction; the default placeholder mode alone only discovers lightweight page refs.
+(Node/WASM), or `extract_images=True` (Python). It defaults to false. Markdown image
+mode controls presentation only; placeholder refs are still discovered without bytes.
 
 > Markdown reconstruction quality varies with document complexity. For the
 > hardest documents (dense tables, multi-column layouts, scans),
@@ -298,7 +301,9 @@ Options:
       --target-pages <pages>   Pages to parse (e.g., "1-5,10,15-20")
       --dpi <dpi>              Rendering DPI [default: 150]
       --image-mode <mode>      Markdown image handling: off|placeholder|embed [default: placeholder]
-      --image-output-dir <dir> Where to write images when --image-mode embed
+      --extract-images         Extract embedded image bytes and metadata
+      --image-output-dir <dir> Write extracted images; requires --extract-images
+      --extract-text-metadata  Include rich PDF text metadata in text items
       --extract-vector-graphics Include page vector shapes and merged H/V lines
       --no-links               Emit link anchor text as plain text (no [text](url)) in markdown
       --extract-annotations    Include PDF annotations in page output

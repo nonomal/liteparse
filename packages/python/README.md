@@ -57,26 +57,27 @@ parser = LiteParse(
     dpi=150,                       # Rendering DPI
     output_format="json",          # "json" | "text" | "markdown"
     image_mode="placeholder",      # Markdown image handling: "placeholder" | "off" | "embed"
-    extract_images=True,            # Extract image bytes + metadata (default: False)
+    extract_images=True,           # Extract image bytes + metadata (default: False)
     image_output_dir="./images",   # Write images and return name/path metadata (optional)
     extract_links=True,            # Render [text](url) links in markdown output
     extract_vector_graphics=False, # Opt-in shapes + merged H/V lines per page
     extract_annotations=False,     # Include page annotations in structured output
     preserve_very_small_text=False, # Keep tiny text
-    include_text_metadata=False,    # Opt in to MCID, font metrics, colors, char codes, and tsg
+    extract_text_metadata=False,    # Opt in to MCID, font metrics, colors, char codes, and trailing_space_generated
     password=None,                 # Password for protected documents
     quiet=False,                   # Suppress progress output
     num_workers=4,                 # Concurrent OCR workers
 )
 ```
 
-When ``image_output_dir`` is set, image extraction is enabled automatically. Each
+When ``extract_images=True``, image extraction is enabled. ``image_output_dir``
+requires that explicit opt-in and writes the extracted bytes to disk. Each
 ``result.images`` entry includes its page bbox, intrinsic pixel dimensions, rotation,
 format, ``name``, and ``path``. Valid source JPEGs are preserved, exact duplicates
 reuse one file, and JSON CLI output contains metadata only—never base64 image data.
-``image_mode="embed"`` also continues to imply extraction. With the defaults
-(``image_mode="placeholder"``, ``extract_images=False``), only lightweight Markdown
-placement refs are collected and ``result.images`` stays empty.
+``image_mode`` controls Markdown presentation only and does not imply extraction.
+With ``extract_images=False``, lightweight Markdown placement refs are still collected
+and ``result.images`` stays empty.
 
 When `extract_annotations` is enabled, each parsed page has an `annotations`
 list containing the subtype, contents, author/title, PDF date strings,

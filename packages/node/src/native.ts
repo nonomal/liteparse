@@ -41,7 +41,7 @@ export interface LiteParseNativeConfig {
   ocrFailureFatal?: boolean;
   ocrHedgeDelaysMs?: number[];
   emitWordBoxes?: boolean;
-  includeTextMetadata?: boolean;
+  extractTextMetadata?: boolean;
   cropBox?: NativeCropBox;
   skipDiagonalText?: boolean;
   includeComplexity?: boolean;
@@ -81,7 +81,7 @@ export interface NativeTextItem {
   fillColor?: string;
   strokeColor?: string;
   charCodes?: number[];
-  tsg?: boolean;
+  trailingSpaceGenerated?: boolean;
   confidence?: number;
   rotation?: number;
   words?: NativeWordBox[];

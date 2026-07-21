@@ -36,10 +36,15 @@ export interface JsLiteParseConfig {
   /**
    * How to surface raster images in markdown output: "off", "placeholder"
    * (default — emits `![](image_pN_K.png)` references with no bytes), or
-   * "embed" (also returns each image's bytes and metadata on `images`).
+   * "embed" (same presentation as placeholder; extraction is independent).
    */
   imageMode?: string
+  /** Extract embedded image bytes and metadata (default false). */
   extractImages?: boolean
+  /**
+   * Directory where embedded image files are written. Requires
+   * `extractImages` to be true.
+   */
   imageOutputDir?: string
   /**
    * Render hyperlink annotations as `[text](url)` in markdown output
@@ -67,7 +72,7 @@ export interface JsLiteParseConfig {
    */
   emitWordBoxes?: boolean
   /** Include rich PDF text metadata on returned text items. Default false. */
-  includeTextMetadata?: boolean
+  extractTextMetadata?: boolean
   /**
    * Restrict output to a page sub-region. Each field is the fraction of the
    * page cropped from that side; a text item survives only if it lies
@@ -85,6 +90,8 @@ export interface JsLiteParseConfig {
    * Default false; enabling it runs an extra vector-text detection pass.
    */
   includeComplexity?: boolean
+  /** Expose page-scoped vector path extraction. Default false. */
+  extractVectorGraphics?: boolean
 }
 /**
  * A page sub-region as the fraction cropped from each side (top-left origin,
@@ -126,7 +133,7 @@ export interface JsTextItem {
   /** Raw PDF content-stream character codes for the source glyphs. */
   charCodes?: Array<number>
   /** True when the trailing source space was synthesized by PDFium. */
-  tsg?: boolean
+  trailingSpaceGenerated?: boolean
   confidence?: number
   /** Rotation in degrees (viewport space). Defaults to 0 when omitted. */
   rotation?: number
@@ -187,13 +194,43 @@ export interface JsParsedPage {
   markdown: string
   textItems: Array<JsTextItem>
   complexity?: JsPageComplexityStats
+  vectorGraphics?: JsVectorGraphics
   annotations?: Array<JsDocumentAnnotation>
+}
+export interface JsVectorShape {
+  bbox: JsRect
+  stroke: boolean
+  strokeColor?: string
+  fill: boolean
+  fillColor?: string
+  hasCurve: boolean
+}
+export interface JsRect {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 export interface JsAnnotationRect {
   x: number
   y: number
   width: number
   height: number
+}
+export interface JsVectorLine {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  stroke: boolean
+  strokeWidth?: number
+  strokeColor?: string
+  fill: boolean
+  fillColor?: string
+}
+export interface JsVectorGraphics {
+  shapes: Array<JsVectorShape>
+  lines: Array<JsVectorLine>
 }
 export interface JsDocumentAnnotation {
   subtype: string

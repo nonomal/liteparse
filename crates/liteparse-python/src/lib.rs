@@ -91,7 +91,7 @@ struct PyTextItem {
     char_codes: Vec<u32>,
     /// True when the trailing source space was synthesized by PDFium.
     #[pyo3(get)]
-    tsg: bool,
+    trailing_space_generated: bool,
     #[pyo3(get)]
     confidence: Option<f64>,
     /// Rotation in degrees (viewport space). Defaults to 0.
@@ -198,7 +198,7 @@ impl PyTextItem {
             fill_color: self.fill_color.clone(),
             stroke_color: self.stroke_color.clone(),
             char_codes: self.char_codes.clone(),
-            tsg: self.tsg,
+            trailing_space_generated: self.trailing_space_generated,
             confidence: self.confidence.map(|v| v as f32),
             ..Default::default()
         }
@@ -223,11 +223,31 @@ impl PyTextItem {
             fill_color: item.fill_color,
             stroke_color: item.stroke_color,
             char_codes: item.char_codes,
-            tsg: item.tsg,
+            trailing_space_generated: item.trailing_space_generated,
             confidence: item.confidence.map(|v| v as f64).or(Some(1.0)),
             rotation: item.rotation as f64,
             words: item.words.into_iter().map(PyWordBox::from_rust).collect(),
         }
+    }
+
+    fn from_rust_for_output(
+        mut item: liteparse::types::TextItem,
+        extract_text_metadata: bool,
+    ) -> Self {
+        if !extract_text_metadata {
+            item.font_height = None;
+            item.font_ascent = None;
+            item.font_descent = None;
+            item.font_weight = None;
+            item.text_width = None;
+            item.font_is_buggy = false;
+            item.mcid = None;
+            item.fill_color = None;
+            item.stroke_color = None;
+            item.char_codes.clear();
+            item.trailing_space_generated = false;
+        }
+        Self::from_rust(item)
     }
 }
 
@@ -369,7 +389,7 @@ impl PyParsedPage {
 }
 
 impl PyParsedPage {
-    fn from_rust(page: liteparse::types::ParsedPage) -> Self {
+    fn from_rust(page: liteparse::types::ParsedPage, extract_text_metadata: bool) -> Self {
         Self {
             page_num: page.page_number as u32,
             width: page.page_width as f64,
@@ -379,7 +399,7 @@ impl PyParsedPage {
             text_items: page
                 .text_items
                 .into_iter()
-                .map(PyTextItem::from_rust)
+                .map(|item| PyTextItem::from_rust_for_output(item, extract_text_metadata))
                 .collect(),
             complexity: page
                 .complexity
@@ -431,12 +451,12 @@ impl PyParseResult {
 }
 
 impl PyParseResult {
-    fn from_rust(result: liteparse::parser::ParseResult) -> Self {
+    fn from_rust(result: liteparse::parser::ParseResult, extract_text_metadata: bool) -> Self {
         Self {
             pages: result
                 .pages
                 .into_iter()
-                .map(PyParsedPage::from_rust)
+                .map(|page| PyParsedPage::from_rust(page, extract_text_metadata))
                 .collect(),
             text: result.text,
             images: result
@@ -729,7 +749,7 @@ struct PyLiteParseConfig {
     #[pyo3(get)]
     include_complexity: bool,
     #[pyo3(get)]
-    include_text_metadata: bool,
+    extract_text_metadata: bool,
     #[pyo3(get)]
     image_output_dir: Option<String>,
     #[pyo3(get)]
@@ -788,7 +808,7 @@ impl PyLiteParseConfig {
                 .map(|c| (c.top, c.right, c.bottom, c.left)),
             skip_diagonal_text: cfg.skip_diagonal_text,
             include_complexity: cfg.include_complexity,
-            include_text_metadata: cfg.include_text_metadata,
+            extract_text_metadata: cfg.extract_text_metadata,
             image_output_dir: cfg.image_output_dir.clone(),
             extract_images: cfg.extract_images,
             extract_vector_graphics: cfg.extract_vector_graphics,
@@ -833,7 +853,7 @@ impl LiteParse {
         ocr_failure_fatal = None,
         ocr_hedge_delays_ms = None,
         emit_word_boxes = None,
-        include_text_metadata = None,
+        extract_text_metadata = None,
         crop_box = None,
         skip_diagonal_text = None,
         include_complexity = None,
@@ -861,7 +881,7 @@ impl LiteParse {
         ocr_failure_fatal: Option<bool>,
         ocr_hedge_delays_ms: Option<Vec<u64>>,
         emit_word_boxes: Option<bool>,
-        include_text_metadata: Option<bool>,
+        extract_text_metadata: Option<bool>,
         crop_box: Option<(f32, f32, f32, f32)>,
         skip_diagonal_text: Option<bool>,
         include_complexity: Option<bool>,
@@ -939,8 +959,8 @@ impl LiteParse {
         if let Some(v) = emit_word_boxes {
             cfg.emit_word_boxes = v;
         }
-        if let Some(v) = include_text_metadata {
-            cfg.include_text_metadata = v;
+        if let Some(v) = extract_text_metadata {
+            cfg.extract_text_metadata = v;
         }
         if let Some((top, right, bottom, left)) = crop_box {
             cfg.crop_box = Some(CropBox {
@@ -977,7 +997,10 @@ impl LiteParse {
         let result = py
             .detach(|| self.runtime.block_on(self.inner.parse_input(pdf_input)))
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-        Ok(PyParseResult::from_rust(result))
+        Ok(PyParseResult::from_rust(
+            result,
+            self.config.extract_text_metadata,
+        ))
     }
 
     /// Parse a document from raw bytes.
@@ -986,7 +1009,10 @@ impl LiteParse {
         let result = py
             .detach(|| self.runtime.block_on(self.inner.parse_input(pdf_input)))
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-        Ok(PyParseResult::from_rust(result))
+        Ok(PyParseResult::from_rust(
+            result,
+            self.config.extract_text_metadata,
+        ))
     }
 
     /// Determine per-page complexity for a document at the given path. Returns
@@ -1165,13 +1191,13 @@ mod tests {
             fill_color: Some("ff112233".into()),
             stroke_color: Some("ff445566".into()),
             char_codes: vec![65, 32],
-            tsg: true,
+            trailing_space_generated: true,
             ..Default::default()
         };
 
         let py = PyTextItem::from_rust(item);
         assert_eq!(py.char_codes, vec![65, 32]);
-        assert!(py.tsg);
+        assert!(py.trailing_space_generated);
         assert_eq!(py.fill_color.as_deref(), Some("ff112233"));
 
         let round_trip = py.to_rust();
@@ -1184,20 +1210,20 @@ mod tests {
         assert_eq!(round_trip.mcid, Some(2));
         assert_eq!(round_trip.stroke_color.as_deref(), Some("ff445566"));
         assert_eq!(round_trip.char_codes, vec![65, 32]);
-        assert!(round_trip.tsg);
+        assert!(round_trip.trailing_space_generated);
     }
 
     #[test]
     fn text_metadata_config_defaults_off_and_can_be_enabled() {
         let py = PyLiteParseConfig::from_rust(&LiteParseConfig::default());
-        assert!(!py.include_text_metadata);
+        assert!(!py.extract_text_metadata);
 
         let config = LiteParseConfig {
-            include_text_metadata: true,
+            extract_text_metadata: true,
             ..Default::default()
         };
         let py = PyLiteParseConfig::from_rust(&config);
-        assert!(py.include_text_metadata);
+        assert!(py.extract_text_metadata);
     }
 
     #[test]

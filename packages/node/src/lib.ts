@@ -33,7 +33,7 @@ export interface LiteParseConfig {
   imageMode: ImageMode;
   /** Extract embedded image bytes and metadata (default: false). */
   extractImages: boolean;
-  /** Directory where extracted embedded image files are written. */
+  /** Directory where extracted embedded image files are written. Requires `extractImages`. */
   imageOutputDir?: string;
   /** Render hyperlink annotations as `[text](url)` in markdown output (default: true). */
   extractLinks: boolean;
@@ -64,7 +64,7 @@ export interface LiteParseConfig {
    */
   emitWordBoxes: boolean;
   /** Include rich PDF text metadata on returned text items. Default false. */
-  includeTextMetadata?: boolean;
+  extractTextMetadata?: boolean;
   /**
    * Restrict output to a page sub-region. Each field is the fraction of the
    * page cropped away from that side (top-left origin), so `{ left: 0.5 }`
@@ -138,7 +138,7 @@ export interface TextItem {
   /** Raw PDF content-stream character codes for the source glyphs. */
   charCodes?: number[];
   /** True when the trailing source space was synthesized by PDFium. */
-  tsg?: boolean;
+  trailingSpaceGenerated?: boolean;
   confidence?: number;
   /** Rotation in degrees (viewport space). Defaults to 0 when omitted. */
   rotation?: number;
@@ -273,7 +273,7 @@ export interface ExtractedImage {
 export interface ParseResult {
   pages: ParsedPage[];
   text: string;
-  /** Populated when image extraction is explicitly or implicitly enabled. */
+  /** Populated only when `extractImages` is true. */
   images: ExtractedImage[];
   /** Embedded image objects that PDFium could not render or encode. */
   imageErrorCount: number;
@@ -393,7 +393,7 @@ export class LiteParse {
       ocrFailureFatal: userConfig.ocrFailureFatal,
       ocrHedgeDelaysMs: userConfig.ocrHedgeDelaysMs,
       emitWordBoxes: userConfig.emitWordBoxes,
-      includeTextMetadata: userConfig.includeTextMetadata,
+      extractTextMetadata: userConfig.extractTextMetadata,
       cropBox: userConfig.cropBox,
       skipDiagonalText: userConfig.skipDiagonalText,
       includeComplexity: userConfig.includeComplexity,
@@ -426,7 +426,7 @@ export class LiteParse {
       ocrFailureFatal: resolved.ocrFailureFatal ?? true,
       ocrHedgeDelaysMs: resolved.ocrHedgeDelaysMs ?? [],
       emitWordBoxes: resolved.emitWordBoxes ?? false,
-      includeTextMetadata: resolved.includeTextMetadata ?? false,
+      extractTextMetadata: resolved.extractTextMetadata ?? false,
       cropBox: resolved.cropBox ?? undefined,
       skipDiagonalText: resolved.skipDiagonalText ?? false,
       includeComplexity: resolved.includeComplexity ?? false,
@@ -585,7 +585,7 @@ function toTextItem(item: NativeTextItem): TextItem {
     fillColor: item.fillColor,
     strokeColor: item.strokeColor,
     charCodes: item.charCodes,
-    tsg: item.tsg,
+    trailingSpaceGenerated: item.trailingSpaceGenerated,
     confidence: item.confidence,
     rotation: item.rotation,
     words: item.words,

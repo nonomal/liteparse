@@ -58,7 +58,7 @@ let config = LiteParseConfig {
     output_format: OutputFormat::Json,    // Json | Text | Markdown
     extract_annotations: false,           // Include page annotations in output
     preserve_very_small_text: false,      // Keep tiny text
-    include_text_metadata: false,         // Opt in to rich PDF text metadata
+    extract_text_metadata: false,         // Opt in to rich PDF text metadata
     password: None,                       // Password for protected documents
     quiet: false,                         // Suppress progress output
     ..Default::default()
@@ -83,11 +83,10 @@ images, and links reconstructed from the spatial layout. Set
 - `image_mode` (`ImageMode::Placeholder` default | `Off` | `Embed`) — how raster
   images are surfaced in the output.
 - `extract_images` (default `false`) — return embedded image bytes and metadata
-  without changing Markdown image handling. `ImageMode::Embed` remains an
-  extraction opt-in for backward compatibility.
+  without changing Markdown image handling. This is the only option that enables
+  extraction.
 - `image_output_dir` — write extracted image files and return their names/paths;
-  setting it enables extraction even without `ImageMode::Embed`. Duplicate image
-  resources reuse the same file.
+  requires `extract_images: true`. Duplicate image resources reuse the same file.
 - `extract_links` (default `true`) — render hyperlink annotations as
   `[text](url)`; set `false` for plain anchor text.
 

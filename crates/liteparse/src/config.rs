@@ -31,15 +31,14 @@ pub struct LiteParseConfig {
     pub quiet: bool,
     /// Number of concurrent OCR workers. Defaults to (number of CPU cores - 1), minimum 1.
     pub num_workers: usize,
-    /// Controls how raster images are surfaced in markdown output. `Embed`
-    /// also exposes image bytes and metadata to callers.
+    /// Controls how raster image references are surfaced in markdown output.
+    /// This does not enable embedded-image extraction.
     pub image_mode: ImageMode,
     /// Extract embedded image bytes and metadata into `ParseResult.images`.
-    /// Defaults to false. `ImageMode::Embed` and `image_output_dir` also imply
-    /// extraction for backward compatibility.
+    /// Defaults to false and is the only switch that enables extraction.
     pub extract_images: bool,
-    /// Directory where extracted embedded images are written. Setting this
-    /// also enables image extraction, independently of `image_mode`.
+    /// Directory where extracted embedded images are written. Requires
+    /// `extract_images` to be true.
     pub image_output_dir: Option<String>,
     /// Extract hyperlink annotations and render them as `[text](url)` in
     /// markdown output. Default on. Disable for benchmark parity with
@@ -74,10 +73,11 @@ pub struct LiteParseConfig {
     /// Include rich PDF text metadata on public text items: MCID, glyph width,
     /// font metrics/weight/buggy state, fill/stroke colors, raw character
     /// codes, and generated-trailing-space state. Default `false` to preserve
-    /// LiteParse's lightweight response shape. Extraction still computes the
-    /// metadata for internal layout; it is stripped only before returning.
+    /// LiteParse's lightweight response shape. Layout-required metrics remain
+    /// available internally; source character codes and generated-space state
+    /// are not computed unless this is enabled.
     #[serde(default)]
-    pub include_text_metadata: bool,
+    pub extract_text_metadata: bool,
     /// Restrict output to a sub-region of every page. Each field is the
     /// fraction of the page to crop away from that side (e.g. `left = 0.5`
     /// discards the left half). A text item is kept only when it lies
@@ -118,9 +118,8 @@ pub struct CropBox {
 ///   reading order at each image's y position, but do **not** extract or
 ///   return pixel bytes. Keeps response size small while letting the LLM see
 ///   where figures live in the document.
-/// * `Embed` — same references, plus bytes and metadata returned via
-///   `ParseResult.images`. Opt-in because pixel bytes can dwarf the text
-///   payload on image-heavy PDFs.
+/// * `Embed` — emit the same references as `Placeholder`. Embedded pixel bytes
+///   are controlled independently by `LiteParseConfig::extract_images`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageMode {
@@ -172,7 +171,7 @@ impl Default for LiteParseConfig {
             ocr_failure_fatal: true,
             ocr_hedge_delays_ms: Vec::new(),
             emit_word_boxes: false,
-            include_text_metadata: false,
+            extract_text_metadata: false,
             crop_box: None,
             skip_diagonal_text: false,
             include_complexity: false,
@@ -294,7 +293,7 @@ mod tests {
         assert_eq!(c.output_format, OutputFormat::Json);
         assert!(!c.preserve_very_small_text);
         assert!(!c.quiet);
-        assert!(!c.include_text_metadata);
+        assert!(!c.extract_text_metadata);
         assert!(c.password.is_none());
         assert!(!c.extract_images);
     }

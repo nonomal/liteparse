@@ -41,7 +41,7 @@ class TextItem:
     #: Raw PDF content-stream character codes for the source glyphs.
     char_codes: List[int] = field(default_factory=list)
     #: True when the trailing source space was synthesized by PDFium.
-    tsg: bool = False
+    trailing_space_generated: bool = False
     confidence: Optional[float] = None
     rotation: float = 0.0
     #: Per-word sub-boxes. Empty unless the parser was configured with
@@ -132,8 +132,8 @@ class ImageRect:
 class ExtractedImage:
     """An embedded raster image extracted from a page.
 
-    Populated when ``extract_images=True``, ``image_mode="embed"``, or an image
-    output directory is configured.
+    Populated only when ``extract_images=True``. ``image_mode`` controls
+    Markdown presentation independently.
     The ``id`` matches the reference used in the markdown output
     (e.g. ``![](image_p1_0.png)`` → ``id="p1_0"``).
     """
@@ -254,7 +254,7 @@ class LiteParseConfig:
     crop_box: Optional[Tuple[float, float, float, float]]
     skip_diagonal_text: bool
     include_complexity: bool
-    include_text_metadata: bool = False
+    extract_text_metadata: bool = False
     extract_images: bool = False
     extract_vector_graphics: bool = False
 

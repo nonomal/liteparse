@@ -55,7 +55,6 @@ pub(crate) fn extract_pages_from_document(
         target_pages,
         max_pages,
         false,
-        false,
         None,
         ExtractionOutputOptions::default(),
     )?
@@ -63,15 +62,14 @@ pub(crate) fn extract_pages_from_document(
 }
 
 /// Same as `extract_pages_from_document` but optionally also renders every
-/// raster image object to bytes (when `render_images = true`). Returned
+/// raster image object to bytes (when `output_options.extract_images` is true). Returned
 /// `ExtractedImage`s carry the same ids the markdown emitter will reference,
-/// so callers can match them up by id. When `render_images = false` the
+/// so callers can match them up by id. When image extraction is disabled the
 /// returned image vec is always empty.
 pub(crate) fn extract_pages_and_images(
     document: &Document,
     target_pages: Option<&[u32]>,
     max_pages: usize,
-    render_images: bool,
     extract_links: bool,
     glyph_resolver: Option<&dyn crate::GlyphResolver>,
     output_options: ExtractionOutputOptions,
@@ -109,6 +107,7 @@ pub(crate) fn extract_pages_and_images(
             &view_box,
             glyph_resolver,
             output_options.emit_word_boxes,
+            output_options.extract_text_metadata,
         )?;
         if extract_links {
             assign_links(&mut text_items, &page.links(&view_box));
@@ -120,7 +119,8 @@ pub(crate) fn extract_pages_and_images(
             .then(|| build_vector_graphics(&paths));
         assign_strikethrough(&mut text_items, &graphics);
         let struct_nodes = extract_page_struct_nodes(&page, &view_box);
-        let extracted_refs = extract_page_image_refs(&page, page_number, render_images);
+        let extracted_refs =
+            extract_page_image_refs(&page, page_number, output_options.extract_images);
         let mut image_refs = extracted_refs.refs;
         image_error_count += extracted_refs.error_count;
         let annotations = output_options.extract_annotations.then(|| {
@@ -143,7 +143,7 @@ pub(crate) fn extract_pages_and_images(
                 .collect()
         });
 
-        if render_images && !image_refs.is_empty() {
+        if output_options.extract_images && !image_refs.is_empty() {
             let rendered = render_page_images(&page, page_number, &image_refs, &mut image_cache);
             image_error_count += rendered.error_count;
             images.extend(rendered.images);
@@ -171,9 +171,11 @@ pub(crate) fn extract_pages_and_images(
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ExtractionOutputOptions {
-    pub emit_word_boxes: bool,
+    pub extract_text_metadata: bool,
+    pub extract_images: bool,
     pub extract_vector_graphics: bool,
     pub extract_annotations: bool,
+    pub emit_word_boxes: bool,
 }
 
 fn rect_from_pdfium(rect: RectF) -> Rect {
@@ -408,7 +410,7 @@ const IMAGE_MAX_COVERAGE: f32 = 0.9;
 
 /// Extract every image referenced in `refs`, preserving valid JPEG streams and
 /// rendering other images to PNG. Returns one `ExtractedImage` per ref. Used
-/// when `ImageMode::Embed` or an output directory is configured. Failures for
+/// when embedded-image extraction is explicitly enabled. Failures for
 /// individual images are counted but do not fail the whole parse.
 struct CachedImage {
     raw_bytes: Vec<u8>,
@@ -950,6 +952,7 @@ fn extract_page_text_items(
     view_box: &RectF,
     glyph_resolver: Option<&dyn crate::GlyphResolver>,
     emit_word_boxes: bool,
+    extract_text_metadata: bool,
 ) -> Result<Vec<TextItem>, LiteParseError> {
     let char_count = text_page.char_count();
     if char_count <= 0 {
@@ -980,7 +983,7 @@ fn extract_page_text_items(
     let page_rotation = page.rotation();
     let vp_xform = page.viewport_transform(view_box);
     let mut items: Vec<TextItem> = Vec::new();
-    let mut seg = SegmentBuilder::new(emit_word_boxes);
+    let mut seg = SegmentBuilder::new(emit_word_boxes, extract_text_metadata);
     let garbage_fonts = detect_garbage_unicode_fonts(text_page, char_count);
     let mut glyph_decoder = GlyphDecoder::new(
         std::env::var("LITEPARSE_DEBUG_GLYPH").is_ok(),
@@ -1071,7 +1074,7 @@ fn extract_page_text_items(
             // Keep PDFium-generated gaps as item boundaries so the emitted
             // item can retain the same trailing-space-generated distinction
             // as the source extractor. The visible text remains trimmed.
-            if is_generated {
+            if is_generated && extract_text_metadata {
                 seg.flush(&mut items);
             }
             continue;
@@ -1933,10 +1936,12 @@ struct SegmentBuilder {
     word_has: bool,
     // When false, per-word tracking is skipped entirely and `words` stays empty.
     emit_words: bool,
+    // When false, source-code/trailing-space metadata is not accumulated.
+    extract_text_metadata: bool,
 }
 
 impl SegmentBuilder {
-    fn new(emit_words: bool) -> Self {
+    fn new(emit_words: bool, extract_text_metadata: bool) -> Self {
         Self {
             text: String::new(),
             vp_left: f32::MAX,
@@ -1976,6 +1981,7 @@ impl SegmentBuilder {
             word_bottom: f32::MIN,
             word_has: false,
             emit_words,
+            extract_text_metadata,
         }
     }
 
@@ -2063,14 +2069,18 @@ impl SegmentBuilder {
         };
         self.has_content = true;
         self.pending_space = false;
-        self.pending_space_char_codes.clear();
+        if self.extract_text_metadata {
+            self.pending_space_char_codes.clear();
+        }
         self.pending_space_generated = false;
         self.words.clear();
         self.word_has = false;
         self.add_word_char(c, vp_loose);
         self.text_width = 0.0;
-        self.char_codes.clear();
-        self.char_codes.push(ch.char_code());
+        if self.extract_text_metadata {
+            self.char_codes.clear();
+            self.char_codes.push(ch.char_code());
+        }
         self.font_is_buggy = false;
         self.font_is_embedded = false;
         self.font = None;
@@ -2170,7 +2180,9 @@ impl SegmentBuilder {
         self.last_char_loose_right = vp_loose.right;
         self.last_char_bottom = vp_strict.bottom;
         self.char_count += 1;
-        self.char_codes.push(ch.char_code());
+        if self.extract_text_metadata {
+            self.char_codes.push(ch.char_code());
+        }
         if counts_as_unmapped(recovered, ch.has_unicode_map_error()) {
             self.unmapped_char_count += 1;
         }
@@ -2216,8 +2228,10 @@ impl SegmentBuilder {
     fn mark_pending_space(&mut self, is_generated: bool, char_code: u32) {
         if self.has_content {
             self.pending_space = true;
-            self.pending_space_generated = is_generated;
-            self.pending_space_char_codes.push(char_code);
+            if self.extract_text_metadata {
+                self.pending_space_generated = is_generated;
+                self.pending_space_char_codes.push(char_code);
+            }
         }
     }
 
@@ -2226,7 +2240,9 @@ impl SegmentBuilder {
         if self.pending_space {
             self.break_word();
             self.text.push(' ');
-            self.char_codes.append(&mut self.pending_space_char_codes);
+            if self.extract_text_metadata {
+                self.char_codes.append(&mut self.pending_space_char_codes);
+            }
             self.pending_space = false;
             self.pending_space_generated = false;
         }
@@ -2239,7 +2255,9 @@ impl SegmentBuilder {
         }
 
         self.break_word();
-        self.char_codes.append(&mut self.pending_space_char_codes);
+        if self.extract_text_metadata {
+            self.char_codes.append(&mut self.pending_space_char_codes);
+        }
         let trimmed = self.text.trim();
         if !trimmed.is_empty() {
             let width = self.vp_right - self.vp_left;
@@ -2276,7 +2294,7 @@ impl SegmentBuilder {
                 fill_color: self.fill_color.clone(),
                 stroke_color: self.stroke_color.clone(),
                 char_codes: std::mem::take(&mut self.char_codes),
-                tsg: self.pending_space_generated,
+                trailing_space_generated: self.pending_space_generated,
                 confidence: None,
                 link: None,
                 strike: false,
@@ -2284,7 +2302,7 @@ impl SegmentBuilder {
             });
         }
 
-        *self = Self::new(self.emit_words);
+        *self = Self::new(self.emit_words, self.extract_text_metadata);
     }
 }
 
@@ -2317,7 +2335,7 @@ mod tests {
     }
 
     fn segment_with_one_char() -> SegmentBuilder {
-        let mut segment = SegmentBuilder::new(false);
+        let mut segment = SegmentBuilder::new(false, true);
         segment.text = "A".into();
         segment.vp_left = 1.0;
         segment.vp_right = 7.0;
@@ -2339,7 +2357,7 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].text, "A");
         assert_eq!(items[0].char_codes, vec![65, 32]);
-        assert!(items[0].tsg);
+        assert!(items[0].trailing_space_generated);
     }
 
     #[test]
@@ -2350,7 +2368,25 @@ mod tests {
         segment.flush(&mut items);
 
         assert_eq!(items[0].char_codes, vec![65, 32]);
-        assert!(!items[0].tsg);
+        assert!(!items[0].trailing_space_generated);
+    }
+
+    #[test]
+    fn disabled_text_metadata_does_not_accumulate_source_codes() {
+        let mut segment = SegmentBuilder::new(false, false);
+        segment.text = "A".into();
+        segment.vp_left = 1.0;
+        segment.vp_right = 7.0;
+        segment.vp_top = 2.0;
+        segment.vp_bottom = 12.0;
+        segment.char_count = 1;
+        segment.has_content = true;
+        segment.mark_pending_space(true, 32);
+        let mut items = Vec::new();
+        segment.flush(&mut items);
+
+        assert!(items[0].char_codes.is_empty());
+        assert!(!items[0].trailing_space_generated);
     }
 
     fn strike_item() -> TextItem {

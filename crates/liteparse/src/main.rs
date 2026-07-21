@@ -101,8 +101,8 @@ struct ParseCommand {
 
     /// How to surface raster images in markdown output:
     /// `off` strips them, `placeholder` (default) emits `![](image_pN_K.png)`
-    /// references in reading order, and `embed` extracts image bytes and
-    /// metadata.
+    /// references in reading order, and `embed` preserves the same presentation.
+    /// Use `--extract-images` to extract image bytes and metadata.
     #[arg(long, default_value = "placeholder")]
     image_mode: String,
 
@@ -111,8 +111,8 @@ struct ParseCommand {
     extract_images: bool,
 
     /// Directory to write embedded images to. Valid source JPEGs keep their
-    /// format; other images are PNG. Setting this enables image extraction
-    /// independently of `--image-mode`. Created if missing.
+    /// format; other images are PNG. Requires `--extract-images`. Created if
+    /// missing.
     #[arg(long)]
     image_output_dir: Option<String>,
 
@@ -134,7 +134,7 @@ struct ParseCommand {
     complexity: bool,
     /// Include rich PDF text metadata in text items and JSON output.
     #[arg(long)]
-    include_text_metadata: bool,
+    extract_text_metadata: bool,
     /// Include page-scoped vector shapes and merged horizontal/vertical lines.
     #[arg(long)]
     extract_vector_graphics: bool,
@@ -233,7 +233,7 @@ struct BatchParseCommand {
     complexity: bool,
     /// Include rich PDF text metadata in text items and JSON output.
     #[arg(long)]
-    include_text_metadata: bool,
+    extract_text_metadata: bool,
     /// Extract embedded image bytes and metadata.
     #[arg(long)]
     extract_images: bool,
@@ -365,7 +365,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 extract_links: !cmd.no_links,
                 extract_annotations: cmd.extract_annotations,
                 include_complexity: cmd.complexity,
-                include_text_metadata: cmd.include_text_metadata,
+                extract_text_metadata: cmd.extract_text_metadata,
                 extract_vector_graphics: cmd.extract_vector_graphics,
                 ..Default::default()
             };
@@ -384,7 +384,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &result.pages,
                     &result.images,
                     result.image_error_count,
-                    lp.config().include_text_metadata,
+                    lp.config().extract_text_metadata,
                 )?,
                 OutputFormat::Text => text::format_text(&result.pages),
                 OutputFormat::Markdown => result.text.clone(),
@@ -461,7 +461,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ocr_server_url: cmd.ocr_server_url,
                 ocr_server_headers: cmd.ocr_server_headers,
                 include_complexity: cmd.complexity,
-                include_text_metadata: cmd.include_text_metadata,
+                extract_text_metadata: cmd.extract_text_metadata,
                 extract_images: cmd.extract_images,
                 extract_vector_graphics: cmd.extract_vector_graphics,
                 extract_annotations: cmd.extract_annotations,
@@ -512,7 +512,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     &result.pages,
                                     &result.images,
                                     result.image_error_count,
-                                    lp.config().include_text_metadata,
+                                    lp.config().extract_text_metadata,
                                 )
                                 .map_err(|e| e.into()),
                                 OutputFormat::Text => Ok(text::format_text(&result.pages)),
@@ -712,13 +712,13 @@ mod tests {
     }
 
     #[test]
-    fn include_text_metadata_flag_is_available_for_parse_and_batch() {
-        let cli = Cli::try_parse_from(["lit", "parse", "document.pdf", "--include-text-metadata"])
+    fn extract_text_metadata_flag_is_available_for_parse_and_batch() {
+        let cli = Cli::try_parse_from(["lit", "parse", "document.pdf", "--extract-text-metadata"])
             .unwrap();
         assert!(matches!(
             cli.command,
             Commands::Parse(ParseCommand {
-                include_text_metadata: true,
+                extract_text_metadata: true,
                 ..
             })
         ));
@@ -728,13 +728,13 @@ mod tests {
             "batch-parse",
             "input",
             "output",
-            "--include-text-metadata",
+            "--extract-text-metadata",
         ])
         .unwrap();
         assert!(matches!(
             cli.command,
             Commands::BatchParse(BatchParseCommand {
-                include_text_metadata: true,
+                extract_text_metadata: true,
                 ..
             })
         ));

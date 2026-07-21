@@ -5,9 +5,9 @@ use napi_derive::napi;
 use liteparse::config::{CropBox, ImageMode, LiteParseConfig, OutputFormat};
 use liteparse::parser::ParseResult;
 use liteparse::types::{
-    DocumentAnnotation, FormField, GraphicPrimitive, Page, ParsedPage, Rect,
+    DocumentAnnotation, FormField, GraphicPrimitive, Page, ParsedPage, Rect, ScreenshotRect,
     StructureAttributeValue, StructureTree, StructureTreeElement, TextItem, VectorGraphics,
-    WordBox,
+    WordBox, XfaPacket,
 };
 
 // ---------------------------------------------------------------------------
@@ -62,6 +62,12 @@ pub struct JsLiteParseConfig {
     pub extract_form_fields: Option<bool>,
     /// Extract the tagged-PDF logical structure tree.
     pub extract_structure_tree: Option<bool>,
+    /// Extract raw XFA packets (name + XML content) into
+    /// `ParseResult.xfaPackets`. Default false.
+    pub extract_xfa_packets: Option<bool>,
+    /// Detect solid rectangles/lines in rendered page screenshots and attach
+    /// them to each screenshot result. Default false.
+    pub detect_screenshot_rects: Option<bool>,
     /// Whether a systemic OCR failure aborts the whole parse (default true).
     /// Set false to keep already-recovered native text and return partial
     /// results when OCR is unavailable, instead of rejecting.
@@ -173,6 +179,12 @@ impl JsLiteParseConfig {
         if let Some(v) = self.extract_structure_tree {
             cfg.extract_structure_tree = v;
         }
+        if let Some(v) = self.extract_xfa_packets {
+            cfg.extract_xfa_packets = v;
+        }
+        if let Some(v) = self.detect_screenshot_rects {
+            cfg.detect_screenshot_rects = v;
+        }
         if let Some(v) = self.ocr_failure_fatal {
             cfg.ocr_failure_fatal = v;
         }
@@ -239,6 +251,8 @@ impl JsLiteParseConfig {
             extract_annotations: Some(cfg.extract_annotations),
             extract_form_fields: Some(cfg.extract_form_fields),
             extract_structure_tree: Some(cfg.extract_structure_tree),
+            extract_xfa_packets: Some(cfg.extract_xfa_packets),
+            detect_screenshot_rects: Some(cfg.detect_screenshot_rects),
             ocr_failure_fatal: Some(cfg.ocr_failure_fatal),
             ocr_hedge_delays_ms: Some(
                 cfg.ocr_hedge_delays_ms
@@ -488,6 +502,7 @@ impl JsPageInput {
             page_number: self.page_number as usize,
             page_width: self.page_width as f32,
             page_height: self.page_height as f32,
+            content_bounds: None,
             text_items: self.text_items.iter().map(JsTextItem::to_rust).collect(),
             graphics: self
                 .graphics
@@ -514,6 +529,9 @@ pub struct JsParsedPage {
     pub page_num: u32,
     pub width: f64,
     pub height: f64,
+    /// Union bbox of the page's top-level content objects in viewport
+    /// coords (visible content extent). Absent for empty pages.
+    pub content_bounds: Option<JsRect>,
     pub text: String,
     pub markdown: String,
     pub text_items: Vec<JsTextItem>,
@@ -787,6 +805,12 @@ impl JsParsedPage {
             page_num: page.page_number as u32,
             width: page.page_width as f64,
             height: page.page_height as f64,
+            content_bounds: page.content_bounds.as_ref().map(|b| JsRect {
+                x: b.x as f64,
+                y: b.y as f64,
+                width: b.width as f64,
+                height: b.height as f64,
+            }),
             text: page.text.clone(),
             markdown: page.markdown.clone(),
             text_items: page
@@ -829,6 +853,34 @@ pub struct JsParseResult {
     pub images: Vec<JsExtractedImage>,
     pub image_error_count: u32,
     pub form_type: Option<i32>,
+    /// The document's `/Info` `Creator` entry, when present.
+    pub creator: Option<String>,
+    /// The document's `/Info` `Producer` entry, when present.
+    pub producer: Option<String>,
+    /// Raw XFA packets; present only when `extractXfaPackets` is enabled.
+    pub xfa_packets: Option<Vec<JsXfaPacket>>,
+}
+
+/// One raw packet from an XFA form document's `/XFA` array.
+#[napi(object)]
+#[derive(Clone)]
+pub struct JsXfaPacket {
+    pub index: u32,
+    pub name: Option<String>,
+    pub content_length: u32,
+    /// Packet content (usually XML), lossily decoded as UTF-8.
+    pub content: Option<String>,
+}
+
+impl JsXfaPacket {
+    fn from_rust(packet: &XfaPacket) -> Self {
+        Self {
+            index: packet.index,
+            name: packet.name.clone(),
+            content_length: packet.content_length,
+            content: packet.content.clone(),
+        }
+    }
 }
 
 #[napi(object)]
@@ -867,6 +919,39 @@ pub struct JsScreenshotResult {
     pub width: u32,
     pub height: u32,
     pub image_buffer: napi::bindgen_prelude::Buffer,
+    /// True when every pixel has the same color (blank page after render).
+    pub is_solid_fill: bool,
+    /// Solid rectangles/lines detected in the raster (viewport coords).
+    /// Populated only when `detectScreenshotRects` is enabled.
+    pub rects: Vec<JsScreenshotRect>,
+}
+
+/// One solid rectangle (or line) detected in a rendered page bitmap, in
+/// viewport coords (top-left origin, 72 DPI).
+#[napi(object)]
+#[derive(Clone)]
+pub struct JsScreenshotRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    /// Fill color as ARGB hex string (e.g. "ff1a2b3c").
+    pub color: String,
+    /// True when the region is a solid line rather than a filled area.
+    pub is_line: bool,
+}
+
+impl JsScreenshotRect {
+    pub fn from_rust(rect: &ScreenshotRect) -> Self {
+        Self {
+            x: rect.x as f64,
+            y: rect.y as f64,
+            width: rect.width as f64,
+            height: rect.height as f64,
+            color: rect.color.clone(),
+            is_line: rect.is_line,
+        }
+    }
 }
 
 #[napi(object)]
@@ -959,6 +1044,12 @@ impl JsParseResult {
             text: result.text.clone(),
             image_error_count: result.image_error_count,
             form_type: result.form_type,
+            creator: result.creator.clone(),
+            producer: result.producer.clone(),
+            xfa_packets: result
+                .xfa_packets
+                .as_ref()
+                .map(|packets| packets.iter().map(JsXfaPacket::from_rust).collect()),
             images: result
                 .images
                 .iter()

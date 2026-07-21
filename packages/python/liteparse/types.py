@@ -137,6 +137,10 @@ class ParsedPage:
     form_fields: Optional[List[FormField]] = None
     #: Present only when parsing with ``extract_structure_tree=True``.
     structure_tree: Optional[StructureTree] = None
+    #: Union bbox ``(x, y, width, height)`` of the page's top-level content
+    #: objects in viewport coords (visible content extent). ``None`` for
+    #: empty pages.
+    content_bounds: Optional[Tuple[float, float, float, float]] = None
 
 
 @dataclass
@@ -200,6 +204,16 @@ class ExtractedImage:
 
 
 @dataclass
+class XfaPacket:
+    """One raw packet from an XFA form document's ``/XFA`` array."""
+    index: int
+    name: Optional[str]
+    content_length: int
+    #: Packet content (usually XML), lossily decoded as UTF-8.
+    content: Optional[str]
+
+
+@dataclass
 class ParseResult:
     """Result of parsing a document."""
     pages: List[ParsedPage]
@@ -208,6 +222,12 @@ class ParseResult:
     image_error_count: int = 0
     #: PDFium form type, present only when ``extract_form_fields=True``.
     form_type: Optional[int] = None
+    #: The document's ``/Info`` ``Creator`` entry, when present.
+    creator: Optional[str] = None
+    #: The document's ``/Info`` ``Producer`` entry, when present.
+    producer: Optional[str] = None
+    #: Raw XFA packets; present only when ``extract_xfa_packets=True``.
+    xfa_packets: Optional[List[XfaPacket]] = None
 
     @property
     def num_pages(self) -> int:
@@ -222,12 +242,31 @@ class ParseResult:
 
 
 @dataclass
+class ScreenshotRect:
+    """One solid rectangle (or line) detected in a rendered page bitmap,
+    in viewport coords (top-left origin, 72 DPI)."""
+    x: float
+    y: float
+    width: float
+    height: float
+    #: Fill color as ARGB hex string (e.g. ``"ff1a2b3c"``).
+    color: str
+    #: True when the region is a solid line rather than a filled area.
+    is_line: bool
+
+
+@dataclass
 class ScreenshotResult:
     """Result of a single page screenshot."""
     page_num: int
     width: int
     height: int
     image_bytes: bytes
+    #: True when every pixel has the same color (blank page after render).
+    is_solid_fill: bool = False
+    #: Solid rectangles/lines detected in the raster. Populated only when
+    #: ``detect_screenshot_rects=True``.
+    rects: List[ScreenshotRect] = field(default_factory=list)
 
 
 @dataclass
@@ -310,6 +349,8 @@ class LiteParseConfig:
     extract_text_metadata: bool = False
     extract_images: bool = False
     extract_vector_graphics: bool = False
+    extract_xfa_packets: bool = False
+    detect_screenshot_rects: bool = False
 
 
 class ParseError(Exception):

@@ -59,6 +59,9 @@ pub struct LiteParseConfig {
     extract_annotations: Option<bool>,
     extract_form_fields: Option<bool>,
     extract_structure_tree: Option<bool>,
+    /// Extract raw XFA packets (name + XML content) into
+    /// `ParseResult.xfaPackets`. Default false.
+    extract_xfa_packets: Option<bool>,
     ocr_failure_fatal: Option<bool>,
     ocr_hedge_delays_ms: Option<Vec<u64>>,
     preserve_very_small_text: Option<bool>,
@@ -154,6 +157,9 @@ impl LiteParseConfig {
         if let Some(v) = self.extract_structure_tree {
             cfg.extract_structure_tree = v;
         }
+        if let Some(v) = self.extract_xfa_packets {
+            cfg.extract_xfa_packets = v;
+        }
         if let Some(v) = self.ocr_failure_fatal {
             cfg.ocr_failure_fatal = v;
         }
@@ -222,6 +228,7 @@ impl LiteParseConfig {
             extract_annotations: Some(cfg.extract_annotations),
             extract_form_fields: Some(cfg.extract_form_fields),
             extract_structure_tree: Some(cfg.extract_structure_tree),
+            extract_xfa_packets: Some(cfg.extract_xfa_packets),
             ocr_failure_fatal: Some(cfg.ocr_failure_fatal),
             ocr_hedge_delays_ms: Some(cfg.ocr_hedge_delays_ms.clone()),
             preserve_very_small_text: Some(cfg.preserve_very_small_text),
@@ -286,6 +293,10 @@ pub struct ParsedPage {
     pub page_num: usize,
     pub width: f32,
     pub height: f32,
+    /// Union bbox of the page's top-level content objects in viewport
+    /// coords (visible content extent). Absent for empty pages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_bounds: Option<VectorRect>,
     pub text: String,
     pub markdown: String,
     pub text_items: Vec<TextItem>,
@@ -458,6 +469,29 @@ pub struct ParseResult {
     pub image_error_count: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub form_type: Option<i32>,
+    /// The document's `/Info` `Creator` entry, when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creator: Option<String>,
+    /// The document's `/Info` `Producer` entry, when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub producer: Option<String>,
+    /// Raw XFA packets; present only when `extractXfaPackets` is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub xfa_packets: Option<Vec<XfaPacket>>,
+}
+
+/// One raw packet from an XFA form document's `/XFA` array.
+#[derive(Serialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
+pub struct XfaPacket {
+    pub index: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub content_length: u32,
+    /// Packet content (usually XML), lossily decoded as UTF-8.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
 }
 
 #[derive(Serialize, Tsify)]
@@ -670,6 +704,12 @@ impl LiteParse {
                 page_num: p.page_number,
                 width: p.page_width,
                 height: p.page_height,
+                content_bounds: p.content_bounds.as_ref().map(|b| VectorRect {
+                    x: b.x,
+                    y: b.y,
+                    width: b.width,
+                    height: b.height,
+                }),
                 text: p.text.clone(),
                 markdown: p.markdown.clone(),
                 text_items: p
@@ -780,6 +820,19 @@ impl LiteParse {
             images,
             image_error_count: result.image_error_count,
             form_type: result.form_type,
+            creator: result.creator.clone(),
+            producer: result.producer.clone(),
+            xfa_packets: result.xfa_packets.as_ref().map(|packets| {
+                packets
+                    .iter()
+                    .map(|packet| XfaPacket {
+                        index: packet.index,
+                        name: packet.name.clone(),
+                        content_length: packet.content_length,
+                        content: packet.content.clone(),
+                    })
+                    .collect()
+            }),
         })
     }
 

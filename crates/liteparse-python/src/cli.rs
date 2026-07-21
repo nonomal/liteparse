@@ -85,6 +85,9 @@ struct ParseCommand {
     /// Include the tagged-PDF logical structure tree.
     #[arg(long)]
     extract_structure_tree: bool,
+    /// Include raw XFA packets (name + XML content) in JSON output.
+    #[arg(long)]
+    extract_xfa_packets: bool,
     /// Include per-page complexity signals as a `complexity` object on each
     /// page of JSON output. Off by default.
     #[arg(long)]
@@ -177,6 +180,9 @@ struct BatchParseCommand {
     /// Include the tagged-PDF logical structure tree.
     #[arg(long)]
     extract_structure_tree: bool,
+    /// Include raw XFA packets (name + XML content) in JSON output.
+    #[arg(long)]
+    extract_xfa_packets: bool,
 }
 
 /// Parse a `Name: Value` header string into a `(name, value)` pair.
@@ -259,6 +265,7 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 extract_annotations: cmd.extract_annotations,
                 extract_form_fields: cmd.extract_form_fields,
                 extract_structure_tree: cmd.extract_structure_tree,
+                extract_xfa_packets: cmd.extract_xfa_packets,
                 include_complexity: cmd.complexity,
                 extract_text_metadata: cmd.extract_text_metadata,
                 extract_vector_graphics: cmd.extract_vector_graphics,
@@ -274,13 +281,9 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 rt.block_on(lp.parse(&cmd.file))?
             };
             let formatted = match lp.config().output_format {
-                OutputFormat::Json => json::format_json_result(
-                    &result.pages,
-                    &result.images,
-                    result.image_error_count,
-                    lp.config().extract_text_metadata,
-                    result.form_type,
-                )?,
+                OutputFormat::Json => {
+                    json::format_json_result(&result, lp.config().extract_text_metadata)?
+                }
                 OutputFormat::Text => text::format_text(&result.pages),
                 OutputFormat::Markdown => result.text.clone(),
             };
@@ -356,6 +359,7 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 extract_images: cmd.extract_images,
                 extract_vector_graphics: cmd.extract_vector_graphics,
                 extract_structure_tree: cmd.extract_structure_tree,
+                extract_xfa_packets: cmd.extract_xfa_packets,
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {
@@ -397,11 +401,8 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                         let fmt_result: Result<String, Box<dyn std::error::Error>> =
                             match lp.config().output_format {
                                 OutputFormat::Json => json::format_json_result(
-                                    &result.pages,
-                                    &result.images,
-                                    result.image_error_count,
+                                    &result,
                                     lp.config().extract_text_metadata,
-                                    result.form_type,
                                 )
                                 .map_err(|e| e.into()),
                                 OutputFormat::Text => Ok(text::format_text(&result.pages)),

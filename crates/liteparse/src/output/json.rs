@@ -1,6 +1,6 @@
 use crate::ocr_merge::PageComplexityStats;
 use crate::types::{
-    DocumentAnnotation, ExtractedImage, FormField, ParsedPage, Rect, StructureTree, VectorGraphics,
+    DocumentAnnotation, FormField, ParsedPage, Rect, StructureTree, VectorGraphics, XfaPacket,
 };
 use serde::Serialize;
 
@@ -48,6 +48,8 @@ pub(crate) struct JsonPage {
     pub page: usize,
     pub width: f32,
     pub height: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_bounds: Option<Rect>,
     pub text: String,
     pub text_items: Vec<JsonTextItem>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -71,6 +73,12 @@ pub(crate) struct ParseResultJson {
     pub image_error_count: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub form_type: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creator: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub producer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub xfa_packets: Option<Vec<XfaPacket>>,
 }
 
 fn is_zero(value: &u32) -> bool {
@@ -99,12 +107,16 @@ pub(crate) fn build_json(pages: &[ParsedPage], extract_text_metadata: bool) -> P
         images: Vec::new(),
         image_error_count: 0,
         form_type: None,
+        creator: None,
+        producer: None,
+        xfa_packets: None,
         pages: pages
             .iter()
             .map(|page| JsonPage {
                 page: page.page_number,
                 width: page.page_width,
                 height: page.page_height,
+                content_bounds: page.content_bounds.clone(),
                 text: page.text.clone(),
                 text_items: page
                     .text_items
@@ -151,17 +163,16 @@ pub(crate) fn build_json(pages: &[ParsedPage], extract_text_metadata: bool) -> P
     }
 }
 
-/// Format complete parse output, including extracted-image metadata. Pixel
+/// Format complete parse output, including extracted-image metadata and
+/// document-level fields (form type, creator/producer, XFA packets). Pixel
 /// bytes are written separately by the CLI's `--image-output-dir` option.
 pub fn format_json_result(
-    pages: &[ParsedPage],
-    images: &[ExtractedImage],
-    image_error_count: u32,
+    result: &crate::parser::ParseResult,
     extract_text_metadata: bool,
-    form_type: Option<i32>,
 ) -> Result<String, serde_json::Error> {
-    let mut result = build_json(pages, extract_text_metadata);
-    result.images = images
+    let mut json = build_json(&result.pages, extract_text_metadata);
+    json.images = result
+        .images
         .iter()
         .map(|image| JsonImage {
             id: image.id.clone(),
@@ -176,9 +187,12 @@ pub fn format_json_result(
             duplicate_of: image.duplicate_of.clone(),
         })
         .collect();
-    result.image_error_count = image_error_count;
-    result.form_type = form_type;
-    serde_json::to_string_pretty(&result)
+    json.image_error_count = result.image_error_count;
+    json.form_type = result.form_type;
+    json.creator = result.creator.clone();
+    json.producer = result.producer.clone();
+    json.xfa_packets = result.xfa_packets.clone();
+    serde_json::to_string_pretty(&json)
 }
 
 /// Format parsed pages as pretty-printed JSON string.
@@ -198,7 +212,7 @@ pub fn format_json_with_text_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{DocumentAnnotation, FormField, ParsedPage, Rect, TextItem};
+    use crate::types::{DocumentAnnotation, ExtractedImage, FormField, ParsedPage, Rect, TextItem};
     use crate::types::{StructureAttributeValue, StructureTree, StructureTreeElement};
     use std::collections::BTreeMap;
 
@@ -221,6 +235,7 @@ mod tests {
             page_number: 1,
             page_width: 612.0,
             page_height: 792.0,
+            content_bounds: None,
             text: "txt".into(),
             markdown: String::new(),
             text_items: items,
@@ -376,9 +391,28 @@ mod tests {
             duplicate_of: Some("p1_0".into()),
             bytes: vec![1, 2, 3],
         };
+        let result = crate::parser::ParseResult {
+            pages: vec![],
+            text: String::new(),
+            outline: vec![],
+            images: vec![image],
+            image_error_count: 2,
+            form_type: None,
+            creator: Some("LibreOffice".into()),
+            producer: Some("LibreOffice 7.4".into()),
+            xfa_packets: Some(vec![crate::types::XfaPacket {
+                index: 0,
+                name: Some("datasets".into()),
+                content_length: 11,
+                content: Some("<xml></xml>".into()),
+            }]),
+        };
         let value: serde_json::Value =
-            serde_json::from_str(&format_json_result(&[], &[image], 2, false, None).unwrap())
-                .unwrap();
+            serde_json::from_str(&format_json_result(&result, false).unwrap()).unwrap();
+        assert_eq!(value["creator"], "LibreOffice");
+        assert_eq!(value["producer"], "LibreOffice 7.4");
+        assert_eq!(value["xfa_packets"][0]["name"], "datasets");
+        assert_eq!(value["xfa_packets"][0]["content_length"], 11);
         assert_eq!(value["images"][0]["bbox"]["x"], 10.0);
         assert_eq!(value["images"][0]["width"], 640);
         assert_eq!(value["images"][0]["rotation"], 90.0);

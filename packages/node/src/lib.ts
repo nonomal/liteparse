@@ -44,6 +44,10 @@ export interface LiteParseConfig {
   extractFormFields: boolean;
   /** Extract the tagged-PDF logical structure tree (default: false). */
   extractStructureTree: boolean;
+  /** Extract raw XFA packets (name + XML content) into `ParseResult.xfaPackets` (default: false). */
+  extractXfaPackets: boolean;
+  /** Detect solid rectangles/lines in rendered page screenshots (default: false). */
+  detectScreenshotRects: boolean;
   preserveVerySmallText: boolean;
   password?: string;
   quiet: boolean;
@@ -194,10 +198,22 @@ export interface PageInput {
   graphics?: Graphic[];
 }
 
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface ParsedPage {
   pageNum: number;
   width: number;
   height: number;
+  /**
+   * Union bbox of the page's top-level content objects in viewport coords
+   * (visible content extent). Absent for empty pages.
+   */
+  contentBounds?: Rect;
   text: string;
   markdown: string;
   textItems: TextItem[];
@@ -326,6 +342,21 @@ export interface ParseResult {
   imageErrorCount: number;
   /** PDFium form type, present only when `extractFormFields` is enabled. */
   formType?: number;
+  /** The document's `/Info` `Creator` entry, when present. */
+  creator?: string;
+  /** The document's `/Info` `Producer` entry, when present. */
+  producer?: string;
+  /** Raw XFA packets; present only when `extractXfaPackets` is enabled. */
+  xfaPackets?: XfaPacket[];
+}
+
+/** One raw packet from an XFA form document's `/XFA` array. */
+export interface XfaPacket {
+  index: number;
+  name?: string;
+  contentLength: number;
+  /** Packet content (usually XML), lossily decoded as UTF-8. */
+  content?: string;
 }
 
 export interface ScreenshotResult {
@@ -333,6 +364,22 @@ export interface ScreenshotResult {
   width: number;
   height: number;
   imageBuffer: Buffer;
+  /** True when every pixel has the same color (blank page after render). */
+  isSolidFill: boolean;
+  /** Solid rectangles/lines detected in the raster (viewport coords). Populated only with `detectScreenshotRects`. */
+  rects: ScreenshotRect[];
+}
+
+/** One solid rectangle (or line) detected in a rendered page bitmap. */
+export interface ScreenshotRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Fill color as ARGB hex string (e.g. "ff1a2b3c"). */
+  color: string;
+  /** True when the region is a solid line rather than a filled area. */
+  isLine: boolean;
 }
 
 /**
@@ -437,6 +484,8 @@ export class LiteParse {
       extractAnnotations: userConfig.extractAnnotations,
       extractFormFields: userConfig.extractFormFields,
       extractStructureTree: userConfig.extractStructureTree,
+      extractXfaPackets: userConfig.extractXfaPackets,
+      detectScreenshotRects: userConfig.detectScreenshotRects,
       preserveVerySmallText: userConfig.preserveVerySmallText,
       password: userConfig.password,
       quiet: userConfig.quiet,
@@ -472,6 +521,8 @@ export class LiteParse {
       extractAnnotations: resolved.extractAnnotations ?? false,
       extractFormFields: resolved.extractFormFields ?? false,
       extractStructureTree: resolved.extractStructureTree ?? false,
+      extractXfaPackets: resolved.extractXfaPackets ?? false,
+      detectScreenshotRects: resolved.detectScreenshotRects ?? false,
       preserveVerySmallText: resolved.preserveVerySmallText ?? false,
       password: resolved.password ?? undefined,
       quiet: resolved.quiet ?? false,
@@ -498,6 +549,9 @@ export class LiteParse {
       images: (result.images ?? []).map(toImage),
       imageErrorCount: result.imageErrorCount ?? 0,
       formType: result.formType,
+      creator: result.creator,
+      producer: result.producer,
+      xfaPackets: result.xfaPackets,
     };
   }
 
@@ -552,6 +606,8 @@ export class LiteParse {
       width: r.width,
       height: r.height,
       imageBuffer: r.imageBuffer,
+      isSolidFill: r.isSolidFill,
+      rects: r.rects,
     }));
   }
 
@@ -595,6 +651,7 @@ function toPage(p: NativeParsedPage): ParsedPage {
     pageNum: p.pageNum,
     width: p.width,
     height: p.height,
+    contentBounds: p.contentBounds,
     text: p.text,
     markdown: p.markdown,
     textItems: p.textItems.map(toTextItem),

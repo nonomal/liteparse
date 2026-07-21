@@ -58,6 +58,16 @@ export interface JsLiteParseConfig {
   /** Extract the tagged-PDF logical structure tree. */
   extractStructureTree?: boolean
   /**
+   * Extract raw XFA packets (name + XML content) into
+   * `ParseResult.xfaPackets`. Default false.
+   */
+  extractXfaPackets?: boolean
+  /**
+   * Detect solid rectangles/lines in rendered page screenshots and attach
+   * them to each screenshot result. Default false.
+   */
+  detectScreenshotRects?: boolean
+  /**
    * Whether a systemic OCR failure aborts the whole parse (default true).
    * Set false to keep already-recovered native text and return partial
    * results when OCR is unavailable, instead of rejecting.
@@ -194,6 +204,11 @@ export interface JsParsedPage {
   pageNum: number
   width: number
   height: number
+  /**
+   * Union bbox of the page's top-level content objects in viewport
+   * coords (visible content extent). Absent for empty pages.
+   */
+  contentBounds?: JsRect
   text: string
   markdown: string
   textItems: Array<JsTextItem>
@@ -293,6 +308,20 @@ export interface JsParseResult {
   images: Array<JsExtractedImage>
   imageErrorCount: number
   formType?: number
+  /** The document's `/Info` `Creator` entry, when present. */
+  creator?: string
+  /** The document's `/Info` `Producer` entry, when present. */
+  producer?: string
+  /** Raw XFA packets; present only when `extractXfaPackets` is enabled. */
+  xfaPackets?: Array<JsXfaPacket>
+}
+/** One raw packet from an XFA form document's `/XFA` array. */
+export interface JsXfaPacket {
+  index: number
+  name?: string
+  contentLength: number
+  /** Packet content (usually XML), lossily decoded as UTF-8. */
+  content?: string
 }
 export interface JsImageRect {
   x: number
@@ -318,6 +347,27 @@ export interface JsScreenshotResult {
   width: number
   height: number
   imageBuffer: Buffer
+  /** True when every pixel has the same color (blank page after render). */
+  isSolidFill: boolean
+  /**
+   * Solid rectangles/lines detected in the raster (viewport coords).
+   * Populated only when `detectScreenshotRects` is enabled.
+   */
+  rects: Array<JsScreenshotRect>
+}
+/**
+ * One solid rectangle (or line) detected in a rendered page bitmap, in
+ * viewport coords (top-left origin, 72 DPI).
+ */
+export interface JsScreenshotRect {
+  x: number
+  y: number
+  width: number
+  height: number
+  /** Fill color as ARGB hex string (e.g. "ff1a2b3c"). */
+  color: string
+  /** True when the region is a solid line rather than a filled area. */
+  isLine: boolean
 }
 export interface JsLayoutComplexityStats {
   columnCount: number

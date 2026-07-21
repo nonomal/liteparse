@@ -327,6 +327,49 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
 
     /// Render the page to a BGRA bitmap at the given DPI.
     pub fn render(&self, dpi: f32) -> Result<Bitmap<'lib>, PdfiumError> {
+        self.render_with_form(dpi, None)
+    }
+
+    /// Render the page to a BGRA bitmap, drawing form-field appearances
+    /// (filled values, checkbox states) on top via `FPDF_FFLDraw` when a form
+    /// environment is supplied. Without it, PDFium only paints widget
+    /// annotations' static appearance streams, so filled-in form data can be
+    /// missing from the raster. The page open/close form notifications are
+    /// wrapped around the render, mirroring the LlamaParse extract binary.
+    pub fn render_with_form(
+        &self,
+        dpi: f32,
+        form: Option<&FormEnvironment>,
+    ) -> Result<Bitmap<'lib>, PdfiumError> {
+        if let Some(form) = form {
+            unsafe {
+                ffi!(FORM_OnAfterLoadPage(self.handle, form.handle));
+                ffi!(FORM_DoPageAAction(
+                    self.handle,
+                    form.handle,
+                    pdfium_sys::FPDFPAGE_AACTION_OPEN as i32,
+                ));
+            }
+        }
+        let result = self.render_bitmap(dpi, form);
+        if let Some(form) = form {
+            unsafe {
+                ffi!(FORM_DoPageAAction(
+                    self.handle,
+                    form.handle,
+                    pdfium_sys::FPDFPAGE_AACTION_CLOSE as i32,
+                ));
+                ffi!(FORM_OnBeforeClosePage(self.handle, form.handle));
+            }
+        }
+        result
+    }
+
+    fn render_bitmap(
+        &self,
+        dpi: f32,
+        form: Option<&FormEnvironment>,
+    ) -> Result<Bitmap<'lib>, PdfiumError> {
         let scale = dpi / 72.0;
         let width = (self.width() * scale).round() as i32;
         let height = (self.height() * scale).round() as i32;
@@ -354,7 +397,70 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
             ));
         }
 
+        if let Some(form) = form {
+            // NOTE: like the LlamaParse extract binary, popup annotations are
+            // not drawn (flags 0 for the form layer draw).
+            unsafe {
+                ffi!(FPDF_FFLDraw(
+                    form.handle,
+                    bitmap.handle(),
+                    self.handle,
+                    0,
+                    0,
+                    width,
+                    height,
+                    0,
+                    0,
+                ));
+            }
+        }
+
         Ok(bitmap)
+    }
+
+    /// Union of all top-level page object bounds, in PDF page space.
+    /// `None` when the page has no content objects. Mirrors the LlamaParse
+    /// extract binary's `Parse_getContentBounds`.
+    pub fn content_bounds(&self) -> Option<RectF> {
+        let count = unsafe { ffi!(FPDFPage_CountObjects(self.handle)) };
+        let mut bounds: Option<RectF> = None;
+        for i in 0..count {
+            let obj = unsafe { ffi!(FPDFPage_GetObject(self.handle, i)) };
+            if obj.is_null() {
+                continue;
+            }
+            let mut left: f32 = 0.0;
+            let mut bottom: f32 = 0.0;
+            let mut right: f32 = 0.0;
+            let mut top: f32 = 0.0;
+            let ok = unsafe {
+                ffi!(FPDFPageObj_GetBounds(
+                    obj,
+                    &mut left,
+                    &mut bottom,
+                    &mut right,
+                    &mut top
+                ))
+            };
+            if ok == 0 {
+                continue;
+            }
+            bounds = Some(match bounds {
+                None => RectF {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                },
+                Some(prev) => RectF {
+                    left: prev.left.min(left),
+                    top: prev.top.max(top),
+                    right: prev.right.max(right),
+                    bottom: prev.bottom.min(bottom),
+                },
+            });
+        }
+        bounds
     }
 
     /// Extract bounding boxes of embedded image objects on this page.

@@ -269,6 +269,7 @@ fn run_bindgen(include_dir: &Path) {
             .header("wrapper.h")
             .clang_arg(format!("-I{}", include_dir.display()))
             .allowlist_function("FPDF.*")
+            .allowlist_function("FORM_.*")
             .allowlist_function("FPDFText_.*")
             .allowlist_function("FPDFPage.*")
             .allowlist_function("FPDFLink_.*")

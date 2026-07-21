@@ -13,7 +13,9 @@ use crate::output::markdown;
 use crate::projection;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::render;
-use crate::types::{ExtractedImage, OutlineTarget, Page, ParsedPage, PdfInput};
+use crate::types::{
+    ExtractedImage, OutlineTarget, Page, ParsedPage, PdfInput, ScreenshotRect, XfaPacket,
+};
 use pdfium::Library;
 
 /// Result of parsing a document.
@@ -36,6 +38,13 @@ pub struct ParseResult {
     /// PDFium form type (0 none, 1 AcroForm, 2 XFA full, 3 XFA foreground),
     /// present only when form-field extraction is enabled.
     pub form_type: Option<i32>,
+    /// The document's `/Info` `Creator` entry, when present.
+    pub creator: Option<String>,
+    /// The document's `/Info` `Producer` entry, when present.
+    pub producer: Option<String>,
+    /// Raw XFA packets, present only when `extract_xfa_packets` is enabled.
+    /// `Some([])` means extraction ran on a non-XFA document.
+    pub xfa_packets: Option<Vec<XfaPacket>>,
 }
 
 /// Result of rendering a single page screenshot.
@@ -45,6 +54,11 @@ pub struct ScreenshotResult {
     pub width: u32,
     pub height: u32,
     pub image_bytes: Vec<u8>,
+    /// True when every pixel has the same color (blank page after render).
+    pub is_solid_fill: bool,
+    /// Solid rectangles/lines detected in the raster (viewport coords).
+    /// Populated only when `LiteParseConfig::detect_screenshot_rects` is on.
+    pub rects: Vec<ScreenshotRect>,
 }
 
 /// Env var pointing at a fragmented glyph-outline → unicode font database
@@ -355,7 +369,18 @@ impl LiteParse {
         let ocr_grayscale = ocr_engine.as_ref().is_some_and(|e| e.prefers_grayscale());
 
         #[allow(unused_mut)] // mutated only by the native image-output writer
-        let (pages, ocr_rendered, outline, mut images, image_error_count, complexity, form_type) = {
+        let (
+            pages,
+            ocr_rendered,
+            outline,
+            mut images,
+            image_error_count,
+            complexity,
+            form_type,
+            creator,
+            producer,
+            xfa_packets,
+        ) = {
             let lib = Library::init();
             #[cfg(not(target_arch = "wasm32"))]
             let repaired_input = self
@@ -378,6 +403,25 @@ impl LiteParse {
                 .config
                 .extract_form_fields
                 .then(|| document.form_type());
+            let creator = document.meta_text("Creator");
+            let producer = document.meta_text("Producer");
+            let xfa_packets = self.config.extract_xfa_packets.then(|| {
+                document
+                    .xfa_packets()
+                    .into_iter()
+                    .map(|packet| XfaPacket {
+                        index: packet.index.max(0) as u32,
+                        name: packet.name,
+                        content_length: packet
+                            .content
+                            .as_ref()
+                            .map_or(0, |content| content.len() as u32),
+                        content: packet
+                            .content
+                            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()),
+                    })
+                    .collect::<Vec<_>>()
+            });
             let outline = extract::extract_outline(&document);
             let (pages, images, image_error_count) = extract::extract_pages_and_images(
                 &document,
@@ -442,6 +486,9 @@ impl LiteParse {
                 image_error_count,
                 complexity,
                 form_type,
+                creator,
+                producer,
+                xfa_packets,
             )
         };
         let mut pages = pages;
@@ -528,6 +575,9 @@ impl LiteParse {
             images,
             image_error_count,
             form_type,
+            creator,
+            producer,
+            xfa_packets,
         })
     }
 
@@ -565,6 +615,9 @@ impl LiteParse {
             images: Vec::new(),
             image_error_count: 0,
             form_type: None,
+            creator: None,
+            producer: None,
+            xfa_packets: None,
         }
     }
 
@@ -610,6 +663,7 @@ impl LiteParse {
             page_numbers.as_deref(),
             self.config.dpi,
             self.config.password.as_deref(),
+            self.config.detect_screenshot_rects,
         )?;
 
         Ok(rendered
@@ -619,6 +673,8 @@ impl LiteParse {
                 width: page.width,
                 height: page.height,
                 image_bytes: page.png_bytes,
+                is_solid_fill: page.is_solid_fill,
+                rects: page.rects,
             })
             .collect())
     }
@@ -638,6 +694,7 @@ mod tests {
             page_number: 1,
             page_width: 100.0,
             page_height: 100.0,
+            content_bounds: None,
             text_items: vec![TextItem {
                 text: "hello".into(),
                 width: 20.0,

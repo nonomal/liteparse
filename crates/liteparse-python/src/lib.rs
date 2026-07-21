@@ -409,6 +409,8 @@ struct PyParsedPage {
     #[pyo3(get)]
     height: f64,
     #[pyo3(get)]
+    content_bounds: Option<PyRect>,
+    #[pyo3(get)]
     text: String,
     #[pyo3(get)]
     markdown: String,
@@ -546,6 +548,12 @@ impl PyParsedPage {
             page_num: page.page_number as u32,
             width: page.page_width as f64,
             height: page.page_height as f64,
+            content_bounds: page.content_bounds.as_ref().map(|b| PyRect {
+                x: b.x as f64,
+                y: b.y as f64,
+                width: b.width as f64,
+                height: b.height as f64,
+            }),
             text: page.text,
             markdown: page.markdown,
             text_items: page
@@ -591,6 +599,36 @@ struct PyParseResult {
     image_error_count: u32,
     #[pyo3(get)]
     form_type: Option<i32>,
+    #[pyo3(get)]
+    creator: Option<String>,
+    #[pyo3(get)]
+    producer: Option<String>,
+    #[pyo3(get)]
+    xfa_packets: Option<Vec<PyXfaPacket>>,
+}
+
+/// One raw packet from an XFA form document's `/XFA` array.
+#[pyclass(frozen, from_py_object)]
+#[derive(Clone)]
+struct PyXfaPacket {
+    #[pyo3(get)]
+    index: u32,
+    #[pyo3(get)]
+    name: Option<String>,
+    #[pyo3(get)]
+    content_length: u32,
+    #[pyo3(get)]
+    content: Option<String>,
+}
+
+#[pymethods]
+impl PyXfaPacket {
+    fn __repr__(&self) -> String {
+        format!(
+            "XfaPacket(index={}, name={:?}, content_length={})",
+            self.index, self.name, self.content_length
+        )
+    }
 }
 
 #[pymethods]
@@ -630,6 +668,19 @@ impl PyParseResult {
                 .collect(),
             image_error_count: result.image_error_count,
             form_type: result.form_type,
+            creator: result.creator,
+            producer: result.producer,
+            xfa_packets: result.xfa_packets.map(|packets| {
+                packets
+                    .into_iter()
+                    .map(|packet| PyXfaPacket {
+                        index: packet.index,
+                        name: packet.name,
+                        content_length: packet.content_length,
+                        content: packet.content,
+                    })
+                    .collect()
+            }),
         }
     }
 }
@@ -724,6 +775,39 @@ struct PyScreenshotResult {
     #[pyo3(get)]
     height: u32,
     image_buffer: Vec<u8>,
+    #[pyo3(get)]
+    is_solid_fill: bool,
+    #[pyo3(get)]
+    rects: Vec<PyScreenshotRect>,
+}
+
+/// One solid rectangle (or line) detected in a rendered page bitmap, in
+/// viewport coords (top-left origin, 72 DPI).
+#[pyclass(frozen, from_py_object)]
+#[derive(Clone)]
+struct PyScreenshotRect {
+    #[pyo3(get)]
+    x: f64,
+    #[pyo3(get)]
+    y: f64,
+    #[pyo3(get)]
+    width: f64,
+    #[pyo3(get)]
+    height: f64,
+    #[pyo3(get)]
+    color: String,
+    #[pyo3(get)]
+    is_line: bool,
+}
+
+#[pymethods]
+impl PyScreenshotRect {
+    fn __repr__(&self) -> String {
+        format!(
+            "ScreenshotRect(x={}, y={}, width={}, height={}, color={}, is_line={})",
+            self.x, self.y, self.width, self.height, self.color, self.is_line
+        )
+    }
 }
 
 #[pymethods]
@@ -906,6 +990,10 @@ struct PyLiteParseConfig {
     #[pyo3(get)]
     extract_structure_tree: bool,
     #[pyo3(get)]
+    extract_xfa_packets: bool,
+    #[pyo3(get)]
+    detect_screenshot_rects: bool,
+    #[pyo3(get)]
     ocr_failure_fatal: bool,
     #[pyo3(get)]
     ocr_hedge_delays_ms: Vec<u64>,
@@ -970,6 +1058,8 @@ impl PyLiteParseConfig {
             extract_annotations: cfg.extract_annotations,
             extract_form_fields: cfg.extract_form_fields,
             extract_structure_tree: cfg.extract_structure_tree,
+            extract_xfa_packets: cfg.extract_xfa_packets,
+            detect_screenshot_rects: cfg.detect_screenshot_rects,
             ocr_failure_fatal: cfg.ocr_failure_fatal,
             ocr_hedge_delays_ms: cfg.ocr_hedge_delays_ms.clone(),
             emit_word_boxes: cfg.emit_word_boxes,
@@ -1023,6 +1113,8 @@ impl LiteParse {
         extract_annotations = None,
         extract_form_fields = None,
         extract_structure_tree = None,
+        extract_xfa_packets = None,
+        detect_screenshot_rects = None,
         ocr_failure_fatal = None,
         ocr_hedge_delays_ms = None,
         emit_word_boxes = None,
@@ -1053,6 +1145,8 @@ impl LiteParse {
         extract_annotations: Option<bool>,
         extract_form_fields: Option<bool>,
         extract_structure_tree: Option<bool>,
+        extract_xfa_packets: Option<bool>,
+        detect_screenshot_rects: Option<bool>,
         ocr_failure_fatal: Option<bool>,
         ocr_hedge_delays_ms: Option<Vec<u64>>,
         emit_word_boxes: Option<bool>,
@@ -1130,6 +1224,12 @@ impl LiteParse {
         }
         if let Some(v) = extract_structure_tree {
             cfg.extract_structure_tree = v;
+        }
+        if let Some(v) = extract_xfa_packets {
+            cfg.extract_xfa_packets = v;
+        }
+        if let Some(v) = detect_screenshot_rects {
+            cfg.detect_screenshot_rects = v;
         }
         if let Some(v) = ocr_failure_fatal {
             cfg.ocr_failure_fatal = v;
@@ -1244,6 +1344,19 @@ impl LiteParse {
                     width: r.width,
                     height: r.height,
                     image_buffer: r.image_bytes,
+                    is_solid_fill: r.is_solid_fill,
+                    rects: r
+                        .rects
+                        .into_iter()
+                        .map(|rect| PyScreenshotRect {
+                            x: rect.x as f64,
+                            y: rect.y as f64,
+                            width: rect.width as f64,
+                            height: rect.height as f64,
+                            color: rect.color,
+                            is_line: rect.is_line,
+                        })
+                        .collect(),
                 })
                 .collect())
         })
@@ -1347,6 +1460,8 @@ fn _liteparse(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStructureTree>()?;
     m.add_class::<PyFormField>()?;
     m.add_class::<PyScreenshotResult>()?;
+    m.add_class::<PyScreenshotRect>()?;
+    m.add_class::<PyXfaPacket>()?;
     m.add_class::<PyPageComplexityStats>()?;
     m.add_class::<PyLayoutComplexityStats>()?;
     m.add_class::<PyRect>()?;

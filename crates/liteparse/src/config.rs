@@ -54,6 +54,17 @@ pub struct LiteParseConfig {
     /// Extract the tagged-PDF logical structure tree. Default `false`.
     #[serde(default)]
     pub extract_structure_tree: bool,
+    /// Extract raw XFA packets (name + XML content) from XFA form documents
+    /// into `ParseResult.xfa_packets`. Default `false`. Non-XFA documents
+    /// yield an empty list.
+    #[serde(default)]
+    pub extract_xfa_packets: bool,
+    /// Detect solid rectangles and thick lines in rendered page screenshots
+    /// and attach them to each `ScreenshotResult.rects`. Works on the raster,
+    /// so it also finds structure in scanned/flattened pages that have no
+    /// vector paths. Default `false` (adds a full-bitmap scan per page).
+    #[serde(default)]
+    pub detect_screenshot_rects: bool,
     /// Whether a systemic OCR failure (every OCR task failed *and* at least one
     /// was a text-sparse page whose primary text source was OCR) aborts the
     /// whole parse. Default `true`: surface the root cause instead of silently
@@ -176,6 +187,8 @@ impl Default for LiteParseConfig {
             extract_annotations: false,
             extract_form_fields: false,
             extract_structure_tree: false,
+            extract_xfa_packets: false,
+            detect_screenshot_rects: false,
             ocr_failure_fatal: true,
             ocr_hedge_delays_ms: Vec::new(),
             emit_word_boxes: false,

@@ -36,6 +36,8 @@ export interface LiteParseNativeConfig {
   extractAnnotations?: boolean;
   extractFormFields?: boolean;
   extractStructureTree?: boolean;
+  extractXfaPackets?: boolean;
+  detectScreenshotRects?: boolean;
   preserveVerySmallText?: boolean;
   password?: string;
   quiet?: boolean;
@@ -114,10 +116,18 @@ export interface NativePageInput {
   graphics?: NativeGraphic[];
 }
 
+export interface NativeRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface NativeParsedPage {
   pageNum: number;
   width: number;
   height: number;
+  contentBounds?: NativeRect;
   text: string;
   markdown: string;
   textItems: NativeTextItem[];
@@ -225,6 +235,16 @@ export interface NativeParseResult {
   images: NativeExtractedImage[];
   imageErrorCount: number;
   formType?: number;
+  creator?: string;
+  producer?: string;
+  xfaPackets?: NativeXfaPacket[];
+}
+
+export interface NativeXfaPacket {
+  index: number;
+  name?: string;
+  contentLength: number;
+  content?: string;
 }
 
 export interface NativeScreenshotResult {
@@ -232,6 +252,17 @@ export interface NativeScreenshotResult {
   width: number;
   height: number;
   imageBuffer: Buffer;
+  isSolidFill: boolean;
+  rects: NativeScreenshotRect[];
+}
+
+export interface NativeScreenshotRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+  isLine: boolean;
 }
 
 export interface NativeLayoutComplexityStats {

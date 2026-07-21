@@ -68,6 +68,10 @@ program
   .option("--extract-annotations", "Include all PDF annotations in page output")
   .option("--extract-form-fields", "Include AcroForm widget fields and values")
   .option("--extract-structure-tree", "Include the tagged-PDF logical structure tree")
+  .option(
+    "--extract-xfa-packets",
+    "Include raw XFA packets (name + XML content) in JSON output",
+  )
   .option("--ocr-server-url <url>", "HTTP OCR server URL")
   .option(
     "--ocr-server-header <header>",
@@ -122,6 +126,7 @@ program
       if (opts.extractAnnotations) config.extractAnnotations = true;
       if (opts.extractFormFields) config.extractFormFields = true;
       if (opts.extractStructureTree) config.extractStructureTree = true;
+      if (opts.extractXfaPackets) config.extractXfaPackets = true;
       if (opts.ocrServerUrl)
         config.ocrServerUrl = opts.ocrServerUrl as string;
       if (opts.ocrServerHeader)
@@ -323,6 +328,10 @@ program
   .option("--extract-form-fields", "Include AcroForm widget fields and values")
   .option("--extract-structure-tree", "Include the tagged-PDF logical structure tree")
   .option(
+    "--extract-xfa-packets",
+    "Include raw XFA packets (name + XML content) in JSON output",
+  )
+  .option(
     "--extract-vector-graphics",
     "Include page-scoped vector shapes and merged horizontal/vertical lines",
   )
@@ -352,6 +361,8 @@ program
         if (opts.extractAnnotations) config.extractAnnotations = true;
         if (opts.extractFormFields) config.extractFormFields = true;
         if (opts.extractStructureTree) config.extractStructureTree = true;
+        if (opts.extractXfaPackets) config.extractXfaPackets = true;
+      if (opts.extractXfaPackets) config.extractXfaPackets = true;
         if (opts.extractVectorGraphics) config.extractVectorGraphics = true;
 
         const parser = new LiteParse(config);

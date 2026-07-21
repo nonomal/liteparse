@@ -2970,3 +2970,22 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn FPDFPage_InsertClipPath(page: FPDF_PAGE, clipPath: FPDF_CLIPPATH);
 }
+unsafe extern "C" {
+    pub fn FORM_OnAfterLoadPage(page: FPDF_PAGE, hHandle: FPDF_FORMHANDLE);
+}
+unsafe extern "C" {
+    pub fn FORM_OnBeforeClosePage(page: FPDF_PAGE, hHandle: FPDF_FORMHANDLE);
+}
+unsafe extern "C" {
+    pub fn FORM_DoDocumentJSAction(hHandle: FPDF_FORMHANDLE);
+}
+unsafe extern "C" {
+    pub fn FORM_DoDocumentOpenAction(hHandle: FPDF_FORMHANDLE);
+}
+unsafe extern "C" {
+    pub fn FORM_DoPageAAction(
+        page: FPDF_PAGE,
+        hHandle: FPDF_FORMHANDLE,
+        aaType: ::std::os::raw::c_int,
+    );
+}

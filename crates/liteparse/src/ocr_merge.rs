@@ -421,6 +421,13 @@ pub(crate) fn render_pages_for_ocr(
     grayscale: bool,
 ) -> Result<Vec<RenderedPage>, LiteParseError> {
     let mut rendered = Vec::new();
+    // Draw form-field appearances into the OCR raster so filled-in form
+    // values are visible to the OCR engine (matches the LlamaParse extract
+    // binary's screenshot rendering).
+    let form = document.form_environment();
+    if let Some(form) = form.as_ref() {
+        form.run_document_actions();
+    }
     for (idx, page) in pages.iter().enumerate() {
         let page_obj = document.page((page.page_number - 1) as i32)?;
         let page_complexity = calculate_page_complexity(page, &page_obj)?;
@@ -429,7 +436,7 @@ pub(crate) fn render_pages_for_ocr(
             continue;
         }
 
-        let bitmap = page_obj.render(dpi)?;
+        let bitmap = page_obj.render_with_form(dpi, form.as_ref())?;
         let width = bitmap.width() as u32;
         let height = bitmap.height() as u32;
         // Grayscale or RGB per the engine; see `OcrEngine::prefers_grayscale`.
@@ -1160,6 +1167,7 @@ mod tests {
             page_number,
             page_width: 100.0,
             page_height: 100.0,
+            content_bounds: None,
             text_items: Vec::new(),
             graphics: Vec::new(),
             vector_graphics: None,
@@ -1189,6 +1197,7 @@ mod tests {
             page_number,
             page_width: 100.0,
             page_height: 100.0,
+            content_bounds: None,
             text_items: vec![TextItem {
                 text: "this page already has real native text content".into(),
                 x: 0.0,
@@ -1216,6 +1225,7 @@ mod tests {
             page_number,
             page_width: 100.0,
             page_height: 100.0,
+            content_bounds: None,
             text_items: vec![TextItem {
                 text: "small native header that is not enough".into(),
                 x: 0.0,

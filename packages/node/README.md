@@ -65,6 +65,8 @@ const parser = new LiteParse({
   extractAnnotations: false,     // Include page annotations in structured output
   extractFormFields: false,      // Include AcroForm widget fields and values
   extractStructureTree: false,   // Include tagged-PDF logical structure
+  extractXfaPackets: false,      // Include raw XFA packets (name + XML content)
+  detectScreenshotRects: false,  // Detect solid rects/lines in screenshots
   preserveVerySmallText: false,  // Keep tiny text
   extractTextMetadata: false,    // Opt in to MCID, font metrics, colors, char codes, and trailingSpaceGenerated
   password: undefined,           // Password for protected documents
@@ -95,6 +97,14 @@ When `extractStructureTree` is enabled, each page has a `structureTree` containi
 all tagged-PDF roots and recursive elements with type, ID, actual/alternate text,
 title, typed attributes, MCIDs, children, and referenced link annotations. Untagged
 pages have an empty `roots` array; the field is omitted when disabled.
+
+Every result also carries the document's `/Info` `creator`/`producer` when
+present, and each page a `contentBounds` union bbox of its top-level content
+objects. With `extractXfaPackets`, `result.xfaPackets` lists each raw XFA
+packet (index, name, content length, XML content); non-XFA documents yield an
+empty array. Screenshots draw form-field appearances into the raster and
+report `isSolidFill` per page, plus detected solid `rects` when
+`detectScreenshotRects` is enabled.
 
 ## Parsing from Bytes
 

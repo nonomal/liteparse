@@ -105,6 +105,10 @@ pub struct Page {
     pub page_number: usize,
     pub page_width: f32,
     pub page_height: f32,
+    /// Union bbox of the page's top-level content objects in viewport
+    /// coords (visible content extent). `None` for empty pages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_bounds: Option<Rect>,
     pub text_items: Vec<TextItem>,
     /// Vector graphics on the page, distilled from PDFium path objects.
     /// Not emitted in JSON/text outputs — consumed by the markdown layout pass.
@@ -226,6 +230,40 @@ pub struct FormField {
     pub selected_options: Vec<String>,
 }
 
+/// One raw packet from an XFA form document's `/XFA` array. Surfaced on
+/// `ParseResult.xfa_packets` when `extract_xfa_packets` is enabled.
+#[derive(Debug, Clone, Serialize)]
+pub struct XfaPacket {
+    /// Zero-based index in the XFA array.
+    pub index: u32,
+    /// Packet name (e.g. `template`, `datasets`), when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Decoded content length in bytes.
+    pub content_length: u32,
+    /// Packet content (usually XML), lossily decoded as UTF-8. `None` when
+    /// the packet stream could not be read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+}
+
+/// One solid rectangle (or thick line) detected in a rendered page bitmap.
+/// Coordinates are in the same top-left, 72-DPI viewport space as text
+/// items. Detection runs on the raster, so it also covers scanned/flattened
+/// pages that carry no vector paths.
+#[derive(Debug, Clone, Serialize)]
+pub struct ScreenshotRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    /// Fill color as ARGB hex string (e.g. "ff1a2b3c").
+    pub color: String,
+    /// True when only one dimension reaches the minimum rectangle size —
+    /// a solid line rather than a filled area.
+    pub is_line: bool,
+}
+
 /// One entry in the document outline (bookmarks). Coordinates are in PDF
 /// user space (origin bottom-left) — convert to viewport with
 /// `page_height - y` once you know the page.
@@ -261,6 +299,10 @@ pub struct ParsedPage {
     pub page_number: usize,
     pub page_width: f32,
     pub page_height: f32,
+    /// Union bbox of the page's top-level content objects in viewport
+    /// coords (visible content extent). `None` for empty pages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_bounds: Option<Rect>,
     pub text: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub markdown: String,
@@ -614,6 +656,7 @@ mod tests {
             page_number: 1,
             page_width: 100.0,
             page_height: 200.0,
+            content_bounds: None,
             text_items: vec![sample_item()],
             graphics: vec![],
             vector_graphics: None,

@@ -116,11 +116,14 @@ pub(crate) fn extract_pages_and_images(
         if extract_links {
             assign_links(&mut text_items, &page.links(&view_box));
         }
+        let content_bounds = page
+            .content_bounds()
+            .map(|bounds| rect_from_pdfium(page.bounds_to_viewport(&view_box, &bounds)));
         let paths = page.path_objects(&view_box);
         let graphics = extract_layout_graphics(&paths);
         let vector_graphics = output_options
             .extract_vector_graphics
-            .then(|| build_vector_graphics(&paths));
+            .then(|| build_vector_graphics(&paths, content_bounds.as_ref()));
         assign_strikethrough(&mut text_items, &graphics);
         let struct_nodes = extract_page_struct_nodes(&page, &view_box);
         let extracted_refs =
@@ -189,6 +192,7 @@ pub(crate) fn extract_pages_and_images(
             page_number: page_number as usize,
             page_width: page.width(),
             page_height: page.height(),
+            content_bounds,
             text_items,
             graphics,
             vector_graphics,
@@ -755,12 +759,13 @@ struct LineCandidate {
     shape_index: usize,
 }
 
-fn build_vector_graphics(paths: &[PathObject]) -> VectorGraphics {
+fn build_vector_graphics(paths: &[PathObject], content_bounds: Option<&Rect>) -> VectorGraphics {
     let painted: Vec<(usize, &PathObject)> = paths
         .iter()
         .enumerate()
         .filter(|(_, path)| path.is_stroked || path.is_filled)
         .collect();
+    let white_fill = compute_white_fill_flags(&painted, content_bounds);
     let raw_shapes: Vec<VectorShape> = painted
         .iter()
         .map(|(_, path)| VectorShape {
@@ -818,6 +823,9 @@ fn build_vector_graphics(paths: &[PathObject]) -> VectorGraphics {
     let mut horizontal = Vec::new();
     let mut vertical = Vec::new();
     for (shape_index, (_, path)) in painted.iter().enumerate() {
+        if white_fill[shape_index] {
+            continue;
+        }
         let mut current = None;
         for segment in &path.segments {
             match segment.kind {
@@ -854,6 +862,64 @@ fn build_vector_graphics(paths: &[PathObject]) -> VectorGraphics {
     let mut lines = merge_axis_lines(horizontal, true, &raw_shapes, &keep);
     lines.extend(merge_axis_lines(vertical, false, &raw_shapes, &keep));
     VectorGraphics { shapes, lines }
+}
+
+/// Port of the LlamaParse extract binary's `PATH_FLAGS_WHITE_FILL` heuristic.
+/// An unstroked solid-white fill is background paint when it is aligned to
+/// the page's content margin, or when it is drawn immediately after — and
+/// overlaps — another white-filled area (pdf writers often paint the
+/// background left-to-right, top-to-bottom as a run of adjacent fills).
+/// Flagged shapes keep their bbox in `shapes` (still useful for chart /
+/// spreadsheet layout detection) but contribute no line segments, which
+/// would otherwise create false positives in outlined-table detection.
+fn compute_white_fill_flags(
+    painted: &[(usize, &PathObject)],
+    content_bounds: Option<&Rect>,
+) -> Vec<bool> {
+    const LINE_DELTA_THRESHOLD: f32 = 1.0;
+    let mut flags = vec![false; painted.len()];
+    let Some(content) = content_bounds else {
+        return flags;
+    };
+    for i in 0..painted.len() {
+        let (path_index, path) = painted[i];
+        if path.is_stroked || !path.is_filled {
+            continue;
+        }
+        let Some(fill) = path.fill_color.as_ref() else {
+            continue;
+        };
+        if fill.r != 0xff || fill.g != 0xff || fill.b != 0xff {
+            continue;
+        }
+        let bounds = &path.bbox;
+        let margin_aligned = (bounds.left - content.x).abs() < LINE_DELTA_THRESHOLD
+            || (bounds.top - content.y).abs() < LINE_DELTA_THRESHOLD
+            || (bounds.right - (content.x + content.width)).abs() < LINE_DELTA_THRESHOLD
+            || (bounds.bottom - (content.y + content.height)).abs() < LINE_DELTA_THRESHOLD;
+        if margin_aligned {
+            flags[i] = true;
+        } else if i > 0 {
+            // Consecutively drawn (adjacent path-object indices; the C
+            // implementation additionally requires the same parent object,
+            // which the flattened path list approximates) and overlapping a
+            // white area extends the blank space.
+            let (prev_index, prev) = painted[i - 1];
+            if flags[i - 1] && path_index == prev_index + 1 && rects_overlap(&prev.bbox, bounds) {
+                flags[i] = true;
+            }
+        }
+    }
+    flags
+}
+
+/// Bbox overlap with the extract binary's `PDF_POINT_EQUAL_THRESHOLD`
+/// slack, in y-down viewport coords (`top <= bottom`).
+fn rects_overlap(a: &pdfium::RectF, b: &pdfium::RectF) -> bool {
+    !(a.left - PATH_EPSILON > b.right
+        || a.right + PATH_EPSILON < b.left
+        || a.top - PATH_EPSILON > b.bottom
+        || a.bottom + PATH_EPSILON < b.top)
 }
 
 fn mergeable_shape(s: &VectorShape) -> bool {
@@ -2618,6 +2684,7 @@ mod tests {
             page_number: 1,
             page_width: 100.0,
             page_height: 100.0,
+            content_bounds: None,
             text_items: items,
             graphics: Vec::new(),
             vector_graphics: None,
@@ -2867,7 +2934,7 @@ mod tests {
                 black,
             ),
         ];
-        let output = build_vector_graphics(&paths);
+        let output = build_vector_graphics(&paths, None);
         assert_eq!(output.shapes.len(), 2);
         assert!(output.shapes[0].has_curve);
         assert_eq!(output.shapes[0].stroke_color.as_deref(), Some("ff000000"));
@@ -2875,6 +2942,135 @@ mod tests {
         assert!((output.lines[0].x1 - 10.0).abs() < 0.001);
         assert!((output.lines[0].x2 - 30.0).abs() < 0.001);
         assert_eq!(output.lines[0].stroke_width, Some(1.0));
+    }
+
+    #[test]
+    fn white_fill_on_content_margin_suppresses_lines_but_keeps_shape() {
+        let white = pdfium::Color {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 255,
+        };
+        // Unstroked solid-white fill whose left edge sits on the content
+        // margin: with content bounds it must contribute no lines; without
+        // content bounds the heuristic is inert and the edges survive.
+        let rect_segments = vec![
+            pdfium::PathSegment {
+                kind: SegmentKind::MoveTo,
+                x: 10.0,
+                y: 10.0,
+                close: false,
+            },
+            pdfium::PathSegment {
+                kind: SegmentKind::LineTo,
+                x: 100.0,
+                y: 10.0,
+                close: false,
+            },
+            pdfium::PathSegment {
+                kind: SegmentKind::LineTo,
+                x: 100.0,
+                y: 50.0,
+                close: false,
+            },
+            pdfium::PathSegment {
+                kind: SegmentKind::LineTo,
+                x: 10.0,
+                y: 50.0,
+                close: false,
+            },
+        ];
+        let paths = vec![vector_path(
+            RectF {
+                left: 10.0,
+                top: 10.0,
+                right: 100.0,
+                bottom: 50.0,
+            },
+            rect_segments,
+            false,
+            true,
+            0.0,
+            white,
+        )];
+        let content = Rect {
+            x: 10.0,
+            y: 5.0,
+            width: 500.0,
+            height: 700.0,
+        };
+
+        let with_bounds = build_vector_graphics(&paths, Some(&content));
+        assert_eq!(with_bounds.shapes.len(), 1);
+        assert!(with_bounds.lines.is_empty());
+
+        let without_bounds = build_vector_graphics(&paths, None);
+        assert!(!without_bounds.lines.is_empty());
+    }
+
+    #[test]
+    fn white_fill_extends_to_consecutive_overlapping_white_fill() {
+        let white = pdfium::Color {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 255,
+        };
+        let segments = |x1: f32, x2: f32| {
+            vec![
+                pdfium::PathSegment {
+                    kind: SegmentKind::MoveTo,
+                    x: x1,
+                    y: 10.0,
+                    close: false,
+                },
+                pdfium::PathSegment {
+                    kind: SegmentKind::LineTo,
+                    x: x2,
+                    y: 10.0,
+                    close: false,
+                },
+            ]
+        };
+        // First fill sits on the left content margin; the second is drawn
+        // immediately after and overlaps it, so the blank area extends.
+        let paths = vec![
+            vector_path(
+                RectF {
+                    left: 10.0,
+                    top: 10.0,
+                    right: 60.0,
+                    bottom: 50.0,
+                },
+                segments(10.0, 60.0),
+                false,
+                true,
+                0.0,
+                white,
+            ),
+            vector_path(
+                RectF {
+                    left: 59.0,
+                    top: 10.0,
+                    right: 120.0,
+                    bottom: 50.0,
+                },
+                segments(59.0, 120.0),
+                false,
+                true,
+                0.0,
+                white,
+            ),
+        ];
+        let content = Rect {
+            x: 10.0,
+            y: 5.0,
+            width: 500.0,
+            height: 700.0,
+        };
+        let output = build_vector_graphics(&paths, Some(&content));
+        assert!(output.lines.is_empty());
     }
 
     #[test]
@@ -2913,7 +3109,7 @@ mod tests {
                 blue,
             ),
         ];
-        let output = build_vector_graphics(&paths);
+        let output = build_vector_graphics(&paths, None);
         assert_eq!(output.shapes.len(), 1);
         assert_eq!(output.shapes[0].bbox.width, 20.0);
         assert_eq!(output.shapes[0].fill_color.as_deref(), Some("ff0000ff"));
@@ -2947,7 +3143,7 @@ mod tests {
             0.0,
             pdfium::Color::default(),
         );
-        let output = build_vector_graphics(&[path]);
+        let output = build_vector_graphics(&[path], None);
         assert!(output.shapes.is_empty());
         assert!(output.lines.is_empty());
     }

@@ -20,8 +20,10 @@ from .types import (
     ParsedPage,
     ParseError,
     ParseResult,
+    ScreenshotRect,
     ScreenshotResult,
     TextItem,
+    XfaPacket,
     WordBox,
     VectorGraphics,
     VectorLine,
@@ -158,6 +160,21 @@ def _convert_native_result(native_result: Any) -> ParseResult:
                 page_num=native_page.page_num,
                 width=native_page.width,
                 height=native_page.height,
+                content_bounds=(
+                    (
+                        native_content_bounds.x,
+                        native_content_bounds.y,
+                        native_content_bounds.width,
+                        native_content_bounds.height,
+                    )
+                    if (
+                        native_content_bounds := getattr(
+                            native_page, "content_bounds", None
+                        )
+                    )
+                    is not None
+                    else None
+                ),
                 text=native_page.text,
                 markdown=native_page.markdown,
                 text_items=text_items,
@@ -290,12 +307,28 @@ def _convert_native_result(native_result: Any) -> ParseResult:
         )
         for img in getattr(native_result, "images", [])
     ]
+    native_xfa_packets = getattr(native_result, "xfa_packets", None)
     return ParseResult(
         pages=pages,
         text=native_result.text,
         images=images,
         image_error_count=getattr(native_result, "image_error_count", 0),
         form_type=getattr(native_result, "form_type", None),
+        creator=getattr(native_result, "creator", None),
+        producer=getattr(native_result, "producer", None),
+        xfa_packets=(
+            [
+                XfaPacket(
+                    index=packet.index,
+                    name=packet.name,
+                    content_length=packet.content_length,
+                    content=packet.content,
+                )
+                for packet in native_xfa_packets
+            ]
+            if native_xfa_packets is not None
+            else None
+        ),
     )
 
 
@@ -335,6 +368,8 @@ class LiteParse:
         extract_annotations: Optional[bool] = None,
         extract_form_fields: Optional[bool] = None,
         extract_structure_tree: Optional[bool] = None,
+        extract_xfa_packets: Optional[bool] = None,
+        detect_screenshot_rects: Optional[bool] = None,
         ocr_failure_fatal: Optional[bool] = None,
         ocr_hedge_delays_ms: Optional[List[int]] = None,
         emit_word_boxes: Optional[bool] = None,
@@ -452,6 +487,10 @@ class LiteParse:
             kwargs["extract_form_fields"] = extract_form_fields
         if extract_structure_tree is not None:
             kwargs["extract_structure_tree"] = extract_structure_tree
+        if extract_xfa_packets is not None:
+            kwargs["extract_xfa_packets"] = extract_xfa_packets
+        if detect_screenshot_rects is not None:
+            kwargs["detect_screenshot_rects"] = detect_screenshot_rects
         if ocr_failure_fatal is not None:
             kwargs["ocr_failure_fatal"] = ocr_failure_fatal
         if ocr_hedge_delays_ms is not None:
@@ -577,6 +616,18 @@ class LiteParse:
                     width=r.width,
                     height=r.height,
                     image_bytes=r.image_bytes,
+                    is_solid_fill=getattr(r, "is_solid_fill", False),
+                    rects=[
+                        ScreenshotRect(
+                            x=rect.x,
+                            y=rect.y,
+                            width=rect.width,
+                            height=rect.height,
+                            color=rect.color,
+                            is_line=rect.is_line,
+                        )
+                        for rect in getattr(r, "rects", [])
+                    ],
                 )
                 for r in native_results
             ]
@@ -615,6 +666,8 @@ class LiteParse:
             extract_text_metadata=cfg.extract_text_metadata,
             extract_images=cfg.extract_images,
             extract_vector_graphics=cfg.extract_vector_graphics,
+            extract_xfa_packets=cfg.extract_xfa_packets,
+            detect_screenshot_rects=cfg.detect_screenshot_rects,
         )
 
     def __repr__(self) -> str:

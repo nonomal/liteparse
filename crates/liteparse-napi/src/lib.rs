@@ -117,6 +117,12 @@ impl LiteParse {
                 width: r.width,
                 height: r.height,
                 image_buffer: r.image_bytes.into(),
+                is_solid_fill: r.is_solid_fill,
+                rects: r
+                    .rects
+                    .iter()
+                    .map(crate::types::JsScreenshotRect::from_rust)
+                    .collect(),
             })
             .collect())
     }

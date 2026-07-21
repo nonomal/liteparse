@@ -253,6 +253,25 @@ text, title, typed scalar attributes, marked-content IDs, children, and referenc
 link annotations. The field is absent by default; enabled untagged pages contain
 `roots: []`.
 
+### Document metadata, content bounds, and XFA packets
+
+Every parse result now carries the document's `/Info` `creator` and `producer`
+entries when present, and every page carries `content_bounds` — the union bbox
+of the page's top-level content objects in viewport coords (absent for empty
+pages). Enable `--extract-xfa-packets` (Rust/Python `extract_xfa_packets`,
+JavaScript/WASM `extractXfaPackets`) to add `xfa_packets` with each raw XFA
+packet's index, name, byte length, and XML content; non-XFA documents yield an
+empty list.
+
+### Screenshot raster signals
+
+Screenshots draw AcroForm field appearances (filled values, checkbox states)
+on top of the page raster, so form data is visible in the render and to OCR.
+Each screenshot result reports `is_solid_fill` (blank page after render), and
+with `detect_screenshot_rects` (Node `detectScreenshotRects`) also `rects` —
+solid same-color rectangles and lines found in the raster in viewport coords,
+which covers scanned/flattened pages that carry no vector paths.
+
 ### Check Complexity
 
 Before committing to a full parse, check whether a document actually needs OCR or

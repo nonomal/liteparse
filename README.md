@@ -168,6 +168,9 @@ lit parse document.pdf --format json --extract-text-metadata
 # Include page annotations in structured JSON
 lit parse document.pdf --format json --extract-annotations
 
+# Include AcroForm widget fields and values (repairs orphaned widgets in memory)
+lit parse document.pdf --format json --extract-form-fields
+
 # Parse a remote PDF
 curl -sL https://example.com/report.pdf | lit parse -
 ```
@@ -307,6 +310,7 @@ Options:
       --extract-vector-graphics Include page vector shapes and merged H/V lines
       --no-links               Emit link anchor text as plain text (no [text](url)) in markdown
       --extract-annotations    Include PDF annotations in page output
+      --extract-form-fields    Include AcroForm widget fields and values
       --preserve-small-text    Keep very small text
       --password <password>    Password for encrypted documents
       --num-workers <n>        Concurrent OCR workers [default: CPU cores - 1]

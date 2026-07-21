@@ -127,6 +127,9 @@ pub struct Page {
     /// disabled extraction from an enabled page with no annotations.
     #[serde(skip)]
     pub annotations: Option<Vec<DocumentAnnotation>>,
+    /// AcroForm widgets when explicitly requested.
+    #[serde(skip)]
+    pub form_fields: Option<Vec<FormField>>,
 }
 
 /// One PDF page annotation. Coordinates use the same top-left, 72-DPI
@@ -148,6 +151,40 @@ pub struct DocumentAnnotation {
     pub quadpoint_rects: Vec<Rect>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uri: Option<String>,
+}
+
+/// One AcroForm widget and its resolved field metadata.
+#[derive(Debug, Clone, Serialize)]
+pub struct FormField {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub field_type: String,
+    pub page: u32,
+    pub annotation_index: i32,
+    pub widget_index: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub object_number: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alternate_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub export_value: Option<String>,
+    pub field_flags: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_count: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_index: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checked: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rect: Option<Rect>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub selected_options: Vec<String>,
 }
 
 /// One entry in the document outline (bookmarks). Coordinates are in PDF
@@ -231,6 +268,9 @@ pub struct ParsedPage {
     /// annotations on this page.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotations: Option<Vec<DocumentAnnotation>>,
+    /// AcroForm widgets when `extract_form_fields` is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub form_fields: Option<Vec<FormField>>,
 }
 
 /// One embedded raster image on a page. `id` is a stable, page-scoped slug
@@ -538,6 +578,7 @@ mod tests {
             struct_nodes: vec![],
             image_refs: vec![],
             annotations: None,
+            form_fields: None,
         };
         let s = serde_json::to_string(&p).unwrap();
         assert!(s.contains("\"page_number\":1"));

@@ -72,6 +72,28 @@ class DocumentAnnotation:
 
 
 @dataclass
+class FormField:
+    """One AcroForm widget and its resolved field metadata."""
+    id: str
+    field_type: str
+    page: int
+    annotation_index: int
+    widget_index: int
+    field_flags: int
+    object_number: Optional[int] = None
+    name: Optional[str] = None
+    alternate_name: Optional[str] = None
+    value: Optional[str] = None
+    export_value: Optional[str] = None
+    control_count: Optional[int] = None
+    control_index: Optional[int] = None
+    checked: Optional[bool] = None
+    rect: Optional[AnnotationRect] = None
+    options: List[str] = field(default_factory=list)
+    selected_options: List[str] = field(default_factory=list)
+
+
+@dataclass
 class ParsedPage:
     """A parsed page from a document."""
     page_num: int
@@ -88,6 +110,8 @@ class ParsedPage:
     vector_graphics: Optional[VectorGraphics] = None
     #: Present only when parsing with ``extract_annotations=True``.
     annotations: Optional[List[DocumentAnnotation]] = None
+    #: Present only when parsing with ``extract_form_fields=True``.
+    form_fields: Optional[List[FormField]] = None
 
 
 @dataclass
@@ -157,6 +181,8 @@ class ParseResult:
     text: str
     images: List[ExtractedImage] = field(default_factory=list)
     image_error_count: int = 0
+    #: PDFium form type, present only when ``extract_form_fields=True``.
+    form_type: Optional[int] = None
 
     @property
     def num_pages(self) -> int:
@@ -246,6 +272,7 @@ class LiteParseConfig:
     image_output_dir: Optional[str]
     extract_links: bool
     extract_annotations: bool
+    extract_form_fields: bool
     ocr_failure_fatal: bool
     ocr_hedge_delays_ms: List[int]
     emit_word_boxes: bool

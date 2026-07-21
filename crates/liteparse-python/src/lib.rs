@@ -177,6 +177,69 @@ impl PyDocumentAnnotation {
     }
 }
 
+#[pyclass(frozen, from_py_object)]
+#[derive(Clone)]
+struct PyFormField {
+    #[pyo3(get)]
+    id: String,
+    #[pyo3(get)]
+    field_type: String,
+    #[pyo3(get)]
+    page: u32,
+    #[pyo3(get)]
+    annotation_index: i32,
+    #[pyo3(get)]
+    widget_index: i32,
+    #[pyo3(get)]
+    object_number: Option<i32>,
+    #[pyo3(get)]
+    name: Option<String>,
+    #[pyo3(get)]
+    alternate_name: Option<String>,
+    #[pyo3(get)]
+    value: Option<String>,
+    #[pyo3(get)]
+    export_value: Option<String>,
+    #[pyo3(get)]
+    field_flags: i32,
+    #[pyo3(get)]
+    control_count: Option<i32>,
+    #[pyo3(get)]
+    control_index: Option<i32>,
+    #[pyo3(get)]
+    checked: Option<bool>,
+    #[pyo3(get)]
+    rect: Option<PyAnnotationRect>,
+    #[pyo3(get)]
+    options: Vec<String>,
+    #[pyo3(get)]
+    selected_options: Vec<String>,
+}
+
+impl PyFormField {
+    fn from_rust(field: liteparse::types::FormField) -> Self {
+        Self {
+            id: field.id,
+            field_type: field.field_type,
+            page: field.page,
+            annotation_index: field.annotation_index,
+            widget_index: field.widget_index,
+            object_number: field.object_number,
+            name: field.name,
+            alternate_name: field.alternate_name,
+            value: field.value,
+            export_value: field.export_value,
+            field_flags: field.field_flags,
+            control_count: field.control_count,
+            control_index: field.control_index,
+            checked: field.checked,
+            rect: field.rect.map(PyAnnotationRect::from_rust),
+            options: field.options,
+            selected_options: field.selected_options,
+        }
+    }
+}
+
 impl PyTextItem {
     fn to_rust(&self) -> liteparse::types::TextItem {
         liteparse::types::TextItem {
@@ -272,6 +335,8 @@ struct PyParsedPage {
     vector_graphics: Option<PyVectorGraphics>,
     #[pyo3(get)]
     annotations: Option<Vec<PyDocumentAnnotation>>,
+    #[pyo3(get)]
+    form_fields: Option<Vec<PyFormField>>,
 }
 
 #[pyclass(frozen, from_py_object)]
@@ -412,6 +477,9 @@ impl PyParsedPage {
                     .map(PyDocumentAnnotation::from_rust)
                     .collect()
             }),
+            form_fields: page
+                .form_fields
+                .map(|fields| fields.into_iter().map(PyFormField::from_rust).collect()),
         }
     }
 }
@@ -427,6 +495,8 @@ struct PyParseResult {
     images: Vec<PyExtractedImage>,
     #[pyo3(get)]
     image_error_count: u32,
+    #[pyo3(get)]
+    form_type: Option<i32>,
 }
 
 #[pymethods]
@@ -465,6 +535,7 @@ impl PyParseResult {
                 .map(PyExtractedImage::from_rust)
                 .collect(),
             image_error_count: result.image_error_count,
+            form_type: result.form_type,
         }
     }
 }
@@ -737,6 +808,8 @@ struct PyLiteParseConfig {
     #[pyo3(get)]
     extract_annotations: bool,
     #[pyo3(get)]
+    extract_form_fields: bool,
+    #[pyo3(get)]
     ocr_failure_fatal: bool,
     #[pyo3(get)]
     ocr_hedge_delays_ms: Vec<u64>,
@@ -799,6 +872,7 @@ impl PyLiteParseConfig {
             },
             extract_links: cfg.extract_links,
             extract_annotations: cfg.extract_annotations,
+            extract_form_fields: cfg.extract_form_fields,
             ocr_failure_fatal: cfg.ocr_failure_fatal,
             ocr_hedge_delays_ms: cfg.ocr_hedge_delays_ms.clone(),
             emit_word_boxes: cfg.emit_word_boxes,
@@ -850,6 +924,7 @@ impl LiteParse {
         image_output_dir = None,
         extract_links = None,
         extract_annotations = None,
+        extract_form_fields = None,
         ocr_failure_fatal = None,
         ocr_hedge_delays_ms = None,
         emit_word_boxes = None,
@@ -878,6 +953,7 @@ impl LiteParse {
         image_output_dir: Option<String>,
         extract_links: Option<bool>,
         extract_annotations: Option<bool>,
+        extract_form_fields: Option<bool>,
         ocr_failure_fatal: Option<bool>,
         ocr_hedge_delays_ms: Option<Vec<u64>>,
         emit_word_boxes: Option<bool>,
@@ -949,6 +1025,9 @@ impl LiteParse {
         }
         if let Some(v) = extract_annotations {
             cfg.extract_annotations = v;
+        }
+        if let Some(v) = extract_form_fields {
+            cfg.extract_form_fields = v;
         }
         if let Some(v) = ocr_failure_fatal {
             cfg.ocr_failure_fatal = v;
@@ -1161,6 +1240,7 @@ fn _liteparse(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWordBox>()?;
     m.add_class::<PyAnnotationRect>()?;
     m.add_class::<PyDocumentAnnotation>()?;
+    m.add_class::<PyFormField>()?;
     m.add_class::<PyScreenshotResult>()?;
     m.add_class::<PyPageComplexityStats>()?;
     m.add_class::<PyLayoutComplexityStats>()?;

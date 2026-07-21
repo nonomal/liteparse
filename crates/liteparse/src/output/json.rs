@@ -1,5 +1,7 @@
 use crate::ocr_merge::PageComplexityStats;
-use crate::types::{DocumentAnnotation, ExtractedImage, ParsedPage, Rect, VectorGraphics};
+use crate::types::{
+    DocumentAnnotation, ExtractedImage, FormField, ParsedPage, Rect, VectorGraphics,
+};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -54,6 +56,8 @@ pub(crate) struct JsonPage {
     pub vector_graphics: Option<VectorGraphics>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotations: Option<Vec<DocumentAnnotation>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub form_fields: Option<Vec<FormField>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -63,6 +67,8 @@ pub(crate) struct ParseResultJson {
     pub images: Vec<JsonImage>,
     #[serde(skip_serializing_if = "is_zero")]
     pub image_error_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub form_type: Option<i32>,
 }
 
 fn is_zero(value: &u32) -> bool {
@@ -90,6 +96,7 @@ pub(crate) fn build_json(pages: &[ParsedPage], extract_text_metadata: bool) -> P
     ParseResultJson {
         images: Vec::new(),
         image_error_count: 0,
+        form_type: None,
         pages: pages
             .iter()
             .map(|page| JsonPage {
@@ -135,6 +142,7 @@ pub(crate) fn build_json(pages: &[ParsedPage], extract_text_metadata: bool) -> P
                 complexity: page.complexity.clone(),
                 vector_graphics: page.vector_graphics.clone(),
                 annotations: page.annotations.clone(),
+                form_fields: page.form_fields.clone(),
             })
             .collect(),
     }
@@ -147,6 +155,7 @@ pub fn format_json_result(
     images: &[ExtractedImage],
     image_error_count: u32,
     extract_text_metadata: bool,
+    form_type: Option<i32>,
 ) -> Result<String, serde_json::Error> {
     let mut result = build_json(pages, extract_text_metadata);
     result.images = images
@@ -165,6 +174,7 @@ pub fn format_json_result(
         })
         .collect();
     result.image_error_count = image_error_count;
+    result.form_type = form_type;
     serde_json::to_string_pretty(&result)
 }
 
@@ -185,7 +195,7 @@ pub fn format_json_with_text_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{DocumentAnnotation, ParsedPage, Rect, TextItem};
+    use crate::types::{DocumentAnnotation, FormField, ParsedPage, Rect, TextItem};
 
     fn item(text: &str, conf: Option<f32>) -> TextItem {
         TextItem {
@@ -218,6 +228,7 @@ mod tests {
             image_refs: vec![],
             complexity: None,
             annotations: None,
+            form_fields: None,
         }
     }
 
@@ -325,7 +336,8 @@ mod tests {
             bytes: vec![1, 2, 3],
         };
         let value: serde_json::Value =
-            serde_json::from_str(&format_json_result(&[], &[image], 2, false).unwrap()).unwrap();
+            serde_json::from_str(&format_json_result(&[], &[image], 2, false, None).unwrap())
+                .unwrap();
         assert_eq!(value["images"][0]["bbox"]["x"], 10.0);
         assert_eq!(value["images"][0]["width"], 640);
         assert_eq!(value["images"][0]["rotation"], 90.0);
@@ -389,5 +401,35 @@ mod tests {
         let value = serde_json::to_value(build_json(&[parsed_page], false)).unwrap();
         assert_eq!(value["pages"][0]["annotations"][0]["subtype"], "highlight");
         assert_eq!(value["pages"][0]["annotations"][0]["rect"]["width"], 90.0);
+    }
+
+    #[test]
+    fn form_fields_use_the_public_snake_case_schema() {
+        let mut parsed_page = page(vec![]);
+        parsed_page.form_fields = Some(vec![FormField {
+            id: "full_name".into(),
+            field_type: "text".into(),
+            page: 1,
+            annotation_index: 2,
+            widget_index: 0,
+            object_number: Some(42),
+            name: Some("full_name".into()),
+            alternate_name: Some("Full name".into()),
+            value: Some("Ada".into()),
+            export_value: None,
+            field_flags: 0,
+            control_count: None,
+            control_index: None,
+            checked: None,
+            rect: None,
+            options: vec![],
+            selected_options: vec![],
+        }]);
+        let value = serde_json::to_value(build_json(&[parsed_page], false)).unwrap();
+        let field = &value["pages"][0]["form_fields"][0];
+        assert_eq!(field["type"], "text");
+        assert_eq!(field["annotation_index"], 2);
+        assert_eq!(field["alternate_name"], "Full name");
+        assert!(field.get("field_type").is_none());
     }
 }

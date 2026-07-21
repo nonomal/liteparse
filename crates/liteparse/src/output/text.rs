@@ -30,6 +30,7 @@ mod tests {
             image_refs: vec![],
             complexity: None,
             annotations: None,
+            form_fields: None,
         }
     }
 

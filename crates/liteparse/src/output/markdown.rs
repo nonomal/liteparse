@@ -161,6 +161,7 @@ mod tests {
             image_refs: vec![],
             complexity: None,
             annotations: None,
+            form_fields: None,
         }
     }
 
@@ -212,6 +213,7 @@ mod tests {
             image_refs: vec![],
             complexity: None,
             annotations: None,
+            form_fields: None,
         };
         let out = format_markdown(&[p], &[], ImageMode::Placeholder);
         assert!(out.contains("```text"));

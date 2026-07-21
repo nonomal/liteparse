@@ -1,7 +1,7 @@
 use crate::error::LiteParseError;
 use crate::glyph_names::resolve_glyph_name;
 use crate::types::{
-    DocumentAnnotation, ExtractedImage, GraphicPrimitive, ImageRef, OutlineTarget,
+    DocumentAnnotation, ExtractedImage, FormField, GraphicPrimitive, ImageRef, OutlineTarget,
     Page as LitePage, PdfInput, Rect, StructNode, TextItem, VectorGraphics, VectorLine,
     VectorShape, WordBox,
 };
@@ -79,6 +79,10 @@ pub(crate) fn extract_pages_and_images(
     let mut images: Vec<ExtractedImage> = Vec::new();
     let mut image_cache: Vec<CachedImage> = Vec::new();
     let mut image_error_count = 0u32;
+    let form_environment = output_options
+        .extract_form_fields
+        .then(|| document.form_environment())
+        .flatten();
 
     for page_index in 0..page_count {
         let page_number = page_index as u32 + 1;
@@ -142,6 +146,32 @@ pub(crate) fn extract_pages_and_images(
                 })
                 .collect()
         });
+        let form_fields = output_options.extract_form_fields.then(|| {
+            form_environment.as_ref().map_or_else(Vec::new, |form| {
+                page.form_fields(form, &view_box, page_number)
+                    .into_iter()
+                    .map(|field| FormField {
+                        id: field.id,
+                        field_type: field.field_type,
+                        page: field.page,
+                        annotation_index: field.annotation_index,
+                        widget_index: field.widget_index,
+                        object_number: field.object_number,
+                        name: field.name,
+                        alternate_name: field.alternate_name,
+                        value: field.value,
+                        export_value: field.export_value,
+                        field_flags: field.field_flags,
+                        control_count: field.control_count,
+                        control_index: field.control_index,
+                        checked: field.checked,
+                        rect: field.rect.map(rect_from_pdfium),
+                        options: field.options,
+                        selected_options: field.selected_options,
+                    })
+                    .collect()
+            })
+        });
 
         if output_options.extract_images && !image_refs.is_empty() {
             let rendered = render_page_images(&page, page_number, &image_refs, &mut image_cache);
@@ -163,6 +193,7 @@ pub(crate) fn extract_pages_and_images(
             struct_nodes,
             image_refs,
             annotations,
+            form_fields,
         });
     }
 
@@ -175,6 +206,7 @@ pub(crate) struct ExtractionOutputOptions {
     pub extract_images: bool,
     pub extract_vector_graphics: bool,
     pub extract_annotations: bool,
+    pub extract_form_fields: bool,
     pub emit_word_boxes: bool,
 }
 
@@ -2532,6 +2564,7 @@ mod tests {
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
             annotations: None,
+            form_fields: None,
         }
     }
 

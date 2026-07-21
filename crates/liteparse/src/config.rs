@@ -48,6 +48,9 @@ pub struct LiteParseConfig {
     /// This is independent of `extract_links`, which only controls Markdown
     /// link reconstruction.
     pub extract_annotations: bool,
+    /// Extract AcroForm widget fields and values. Default `false`.
+    #[serde(default)]
+    pub extract_form_fields: bool,
     /// Whether a systemic OCR failure (every OCR task failed *and* at least one
     /// was a text-sparse page whose primary text source was OCR) aborts the
     /// whole parse. Default `true`: surface the root cause instead of silently
@@ -168,6 +171,7 @@ impl Default for LiteParseConfig {
             image_output_dir: None,
             extract_links: true,
             extract_annotations: false,
+            extract_form_fields: false,
             ocr_failure_fatal: true,
             ocr_hedge_delays_ms: Vec::new(),
             emit_word_boxes: false,

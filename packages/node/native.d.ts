@@ -53,6 +53,7 @@ export interface JsLiteParseConfig {
   extractLinks?: boolean
   /** Extract all PDF annotations as page-scoped structured data. */
   extractAnnotations?: boolean
+  extractFormFields?: boolean
   /**
    * Whether a systemic OCR failure aborts the whole parse (default true).
    * Set false to keep already-recovered native text and return partial
@@ -196,6 +197,7 @@ export interface JsParsedPage {
   complexity?: JsPageComplexityStats
   vectorGraphics?: JsVectorGraphics
   annotations?: Array<JsDocumentAnnotation>
+  formFields?: Array<JsFormField>
 }
 export interface JsVectorShape {
   bbox: JsRect
@@ -242,11 +244,32 @@ export interface JsDocumentAnnotation {
   quadpointRects: Array<JsAnnotationRect>
   uri?: string
 }
+
+export interface JsFormField {
+  id: string
+  fieldType: string
+  page: number
+  annotationIndex: number
+  widgetIndex: number
+  objectNumber?: number
+  name?: string
+  alternateName?: string
+  value?: string
+  exportValue?: string
+  fieldFlags: number
+  controlCount?: number
+  controlIndex?: number
+  checked?: boolean
+  rect?: JsAnnotationRect
+  options: Array<string>
+  selectedOptions: Array<string>
+}
 export interface JsParseResult {
   pages: Array<JsParsedPage>
   text: string
   images: Array<JsExtractedImage>
   imageErrorCount: number
+  formType?: number
 }
 export interface JsImageRect {
   x: number

@@ -127,6 +127,10 @@ struct ParseCommand {
     #[arg(long)]
     extract_annotations: bool,
 
+    /// Include AcroForm widget fields and values as page-scoped structured data.
+    #[arg(long)]
+    extract_form_fields: bool,
+
     /// Include per-page complexity signals (the same `is-complex` reports) as a
     /// `complexity` object on each page of JSON output. Off by default; enabling
     /// it runs the extra vector-text detection pass.
@@ -244,6 +248,9 @@ struct BatchParseCommand {
     /// Include all PDF annotations as page-scoped structured JSON/API data.
     #[arg(long)]
     extract_annotations: bool,
+    /// Include AcroForm widget fields and values as page-scoped structured data.
+    #[arg(long)]
+    extract_form_fields: bool,
 }
 
 #[derive(Args, Debug)]
@@ -364,6 +371,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 image_output_dir: cmd.image_output_dir.clone(),
                 extract_links: !cmd.no_links,
                 extract_annotations: cmd.extract_annotations,
+                extract_form_fields: cmd.extract_form_fields,
                 include_complexity: cmd.complexity,
                 extract_text_metadata: cmd.extract_text_metadata,
                 extract_vector_graphics: cmd.extract_vector_graphics,
@@ -385,6 +393,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &result.images,
                     result.image_error_count,
                     lp.config().extract_text_metadata,
+                    result.form_type,
                 )?,
                 OutputFormat::Text => text::format_text(&result.pages),
                 OutputFormat::Markdown => result.text.clone(),
@@ -465,6 +474,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 extract_images: cmd.extract_images,
                 extract_vector_graphics: cmd.extract_vector_graphics,
                 extract_annotations: cmd.extract_annotations,
+                extract_form_fields: cmd.extract_form_fields,
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {
@@ -513,6 +523,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     &result.images,
                                     result.image_error_count,
                                     lp.config().extract_text_metadata,
+                                    result.form_type,
                                 )
                                 .map_err(|e| e.into()),
                                 OutputFormat::Text => Ok(text::format_text(&result.pages)),
@@ -735,6 +746,35 @@ mod tests {
             cli.command,
             Commands::BatchParse(BatchParseCommand {
                 extract_text_metadata: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn extract_form_fields_flag_is_available_for_parse_and_batch() {
+        let cli =
+            Cli::try_parse_from(["lit", "parse", "document.pdf", "--extract-form-fields"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Parse(ParseCommand {
+                extract_form_fields: true,
+                ..
+            })
+        ));
+
+        let cli = Cli::try_parse_from([
+            "lit",
+            "batch-parse",
+            "input",
+            "output",
+            "--extract-form-fields",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::BatchParse(BatchParseCommand {
+                extract_form_fields: true,
                 ..
             })
         ));

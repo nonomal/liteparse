@@ -2916,6 +2916,7 @@ pub fn project_pages_to_grid(pages: Vec<Page>) -> Vec<ParsedPage> {
                 image_refs: page.image_refs,
                 complexity: None,
                 annotations: page.annotations,
+                form_fields: page.form_fields,
             }
         })
         .collect()
@@ -5008,6 +5009,7 @@ mod tests {
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
             annotations: None,
+            form_fields: None,
         };
         let projection_boxes = vec![
             projected_item("", 10.0, 0.0, 10.0),
@@ -5311,6 +5313,7 @@ mod tests {
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
             annotations: None,
+            form_fields: None,
         }];
 
         let parsed = project_pages_to_grid(pages);
@@ -5350,6 +5353,7 @@ mod tests {
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
             annotations: None,
+            form_fields: None,
         }];
 
         let parsed = project_pages_to_grid(pages);
@@ -5412,6 +5416,7 @@ mod tests {
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
             annotations: None,
+            form_fields: None,
         }];
 
         let parsed = project_pages_to_grid(pages);
@@ -5454,6 +5459,7 @@ mod tests {
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
             annotations: None,
+            form_fields: None,
         }];
 
         let parsed = project_pages_to_grid(pages);

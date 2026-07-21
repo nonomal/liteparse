@@ -33,6 +33,9 @@ pub struct ParseResult {
     /// Number of embedded image objects that could not be extracted. A bad
     /// image does not fail the rest of the document parse.
     pub image_error_count: u32,
+    /// PDFium form type (0 none, 1 AcroForm, 2 XFA full, 3 XFA foreground),
+    /// present only when form-field extraction is enabled.
+    pub form_type: Option<i32>,
 }
 
 /// Result of rendering a single page screenshot.
@@ -352,9 +355,29 @@ impl LiteParse {
         let ocr_grayscale = ocr_engine.as_ref().is_some_and(|e| e.prefers_grayscale());
 
         #[allow(unused_mut)] // mutated only by the native image-output writer
-        let (pages, ocr_rendered, outline, mut images, image_error_count, complexity) = {
+        let (pages, ocr_rendered, outline, mut images, image_error_count, complexity, form_type) = {
             let lib = Library::init();
-            let document = extract::load_document_from_input(&lib, &validated_input, password)?;
+            #[cfg(not(target_arch = "wasm32"))]
+            let repaired_input = self
+                .config
+                .extract_form_fields
+                .then(|| {
+                    crate::acroform_repair::repair_orphaned_widgets(
+                        &lib,
+                        &validated_input,
+                        password,
+                    )
+                })
+                .flatten();
+            #[cfg(not(target_arch = "wasm32"))]
+            let document_input = repaired_input.as_ref().unwrap_or(&validated_input);
+            #[cfg(target_arch = "wasm32")]
+            let document_input = &validated_input;
+            let document = extract::load_document_from_input(&lib, document_input, password)?;
+            let form_type = self
+                .config
+                .extract_form_fields
+                .then(|| document.form_type());
             let outline = extract::extract_outline(&document);
             let (pages, images, image_error_count) = extract::extract_pages_and_images(
                 &document,
@@ -369,6 +392,7 @@ impl LiteParse {
                     extract_text_metadata: self.config.extract_text_metadata,
                     extract_vector_graphics: self.config.extract_vector_graphics,
                     extract_annotations: self.config.extract_annotations,
+                    extract_form_fields: self.config.extract_form_fields,
                 },
             )?;
             let t_extract = web_time::Instant::now();
@@ -416,6 +440,7 @@ impl LiteParse {
                 images,
                 image_error_count,
                 complexity,
+                form_type,
             )
         };
         let mut pages = pages;
@@ -501,6 +526,7 @@ impl LiteParse {
             outline,
             images,
             image_error_count,
+            form_type,
         })
     }
 
@@ -537,6 +563,7 @@ impl LiteParse {
             outline,
             images: Vec::new(),
             image_error_count: 0,
+            form_type: None,
         }
     }
 
@@ -634,6 +661,7 @@ mod tests {
             struct_nodes: vec![],
             image_refs: vec![],
             annotations: None,
+            form_fields: None,
         }
     }
 

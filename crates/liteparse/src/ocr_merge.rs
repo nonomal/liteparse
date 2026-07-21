@@ -1166,6 +1166,7 @@ mod tests {
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
             annotations: None,
+            form_fields: None,
         }
     }
 
@@ -1200,6 +1201,7 @@ mod tests {
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
             annotations: None,
+            form_fields: None,
         }
     }
 
@@ -1225,6 +1227,7 @@ mod tests {
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
             annotations: None,
+            form_fields: None,
         }
     }
 

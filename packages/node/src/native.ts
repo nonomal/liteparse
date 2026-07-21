@@ -34,6 +34,7 @@ export interface LiteParseNativeConfig {
   imageOutputDir?: string;
   extractLinks?: boolean;
   extractAnnotations?: boolean;
+  extractFormFields?: boolean;
   preserveVerySmallText?: boolean;
   password?: string;
   quiet?: boolean;
@@ -122,6 +123,7 @@ export interface NativeParsedPage {
   complexity?: NativePageComplexityStats;
   vectorGraphics?: NativeVectorGraphics;
   annotations?: NativeDocumentAnnotation[];
+  formFields?: NativeFormField[];
 }
 
 export interface NativeVectorGraphics {
@@ -158,6 +160,26 @@ export interface NativeDocumentAnnotation {
   uri?: string;
 }
 
+export interface NativeFormField {
+  id: string;
+  fieldType: string;
+  page: number;
+  annotationIndex: number;
+  widgetIndex: number;
+  objectNumber?: number;
+  name?: string;
+  alternateName?: string;
+  value?: string;
+  exportValue?: string;
+  fieldFlags: number;
+  controlCount?: number;
+  controlIndex?: number;
+  checked?: boolean;
+  rect?: NativeAnnotationRect;
+  options: string[];
+  selectedOptions: string[];
+}
+
 export interface NativeExtractedImage {
   id: string;
   name: string;
@@ -177,6 +199,7 @@ export interface NativeParseResult {
   text: string;
   images: NativeExtractedImage[];
   imageErrorCount: number;
+  formType?: number;
 }
 
 export interface NativeScreenshotResult {

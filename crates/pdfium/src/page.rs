@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::bitmap::Bitmap;
-use crate::document::Document;
+use crate::document::{Document, FormEnvironment};
 use crate::error::PdfiumError;
 use crate::ffi;
 use crate::text_page::TextPage;
@@ -193,6 +193,29 @@ pub struct PdfAnnotation {
     pub rect: Option<RectF>,
     pub quadpoint_rects: Vec<RectF>,
     pub uri: Option<String>,
+}
+
+/// One AcroForm widget with its resolved field metadata. A logical radio or
+/// checkbox field may appear more than once when it owns several widgets.
+#[derive(Debug, Clone)]
+pub struct PdfFormField {
+    pub id: String,
+    pub field_type: String,
+    pub page: u32,
+    pub annotation_index: i32,
+    pub widget_index: i32,
+    pub object_number: Option<i32>,
+    pub name: Option<String>,
+    pub alternate_name: Option<String>,
+    pub value: Option<String>,
+    pub export_value: Option<String>,
+    pub field_flags: i32,
+    pub control_count: Option<i32>,
+    pub control_index: Option<i32>,
+    pub checked: Option<bool>,
+    pub rect: Option<RectF>,
+    pub options: Vec<String>,
+    pub selected_options: Vec<String>,
 }
 
 /// A loaded page within a [`Document`].
@@ -755,6 +778,235 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
         }
         out
     }
+
+    /// Enumerate AcroForm widget annotations and resolve their field values
+    /// through PDFium's form-fill environment.
+    pub fn form_fields(
+        &self,
+        form: &FormEnvironment<'_, '_>,
+        view_box: &RectF,
+        page_number: u32,
+    ) -> Vec<PdfFormField> {
+        let count = unsafe { ffi!(FPDFPage_GetAnnotCount(self.handle)) };
+        let mut out = Vec::new();
+        let mut widget_index = 0;
+        for annotation_index in 0..count {
+            let annot = unsafe { ffi!(FPDFPage_GetAnnot(self.handle, annotation_index)) };
+            if annot.is_null() {
+                continue;
+            }
+            if unsafe { ffi!(FPDFAnnot_GetSubtype(annot)) } != pdfium_sys::FPDF_ANNOT_WIDGET as i32
+            {
+                unsafe { ffi!(FPDFPage_CloseAnnot(annot)) };
+                continue;
+            }
+
+            let parent =
+                unsafe { ffi!(FPDFAnnot_GetLinkedAnnot(annot, b"Parent\0".as_ptr().cast())) };
+            let name = first_present([
+                read_form_string(
+                    form.handle,
+                    annot,
+                    |handle, annotation, buffer, len| unsafe {
+                        ffi!(FPDFAnnot_GetFormFieldName(handle, annotation, buffer, len))
+                    },
+                ),
+                read_annotation_string(annot, b"T\0"),
+                (!parent.is_null())
+                    .then(|| read_annotation_string(parent, b"T\0"))
+                    .flatten(),
+            ]);
+            let alternate_name = first_present([
+                read_form_string(
+                    form.handle,
+                    annot,
+                    |handle, annotation, buffer, len| unsafe {
+                        ffi!(FPDFAnnot_GetFormFieldAlternateName(
+                            handle, annotation, buffer, len
+                        ))
+                    },
+                ),
+                read_annotation_string(annot, b"TU\0"),
+                (!parent.is_null())
+                    .then(|| read_annotation_string(parent, b"TU\0"))
+                    .flatten(),
+            ]);
+            let value = first_present([
+                read_form_string(
+                    form.handle,
+                    annot,
+                    |handle, annotation, buffer, len| unsafe {
+                        ffi!(FPDFAnnot_GetFormFieldValue(handle, annotation, buffer, len))
+                    },
+                ),
+                read_annotation_string(annot, b"V\0"),
+                (!parent.is_null())
+                    .then(|| read_annotation_string(parent, b"V\0"))
+                    .flatten(),
+            ]);
+            let appearance_state = read_annotation_string(annot, b"AS\0");
+            let mut export_value = first_present([
+                read_form_string(
+                    form.handle,
+                    annot,
+                    |handle, annotation, buffer, len| unsafe {
+                        ffi!(FPDFAnnot_GetFormFieldExportValue(
+                            handle, annotation, buffer, len
+                        ))
+                    },
+                ),
+                read_annotation_string(annot, b"V\0"),
+            ]);
+            if export_value.is_none() {
+                export_value = appearance_state
+                    .as_ref()
+                    .filter(|state| state.as_str() != "Off")
+                    .cloned();
+            }
+
+            let raw_type = unsafe { ffi!(FPDFAnnot_GetFormFieldType(form.handle, annot)) };
+            let object_number = match unsafe { ffi!(FPDFAnnot_GetObjNum(annot)) } {
+                number if number > 0 => Some(number),
+                _ => None,
+            };
+            let id = name
+                .clone()
+                .or_else(|| object_number.map(|n| format!("pdf-object-{n}")))
+                .unwrap_or_else(|| format!("page-{page_number}-widget-{widget_index}"));
+            let rect = annotation_rect(self, annot, view_box);
+            let option_count = unsafe { ffi!(FPDFAnnot_GetOptionCount(form.handle, annot)) };
+            let mut options = Vec::new();
+            let mut selected_options = Vec::new();
+            for option_index in 0..option_count.max(0) {
+                if let Some(label) = read_form_option_label(form.handle, annot, option_index) {
+                    if unsafe { ffi!(FPDFAnnot_IsOptionSelected(form.handle, annot, option_index)) }
+                        != 0
+                    {
+                        selected_options.push(label.clone());
+                    }
+                    options.push(label);
+                }
+            }
+            let is_checkable = raw_type == pdfium_sys::FPDF_FORMFIELD_CHECKBOX as i32
+                || raw_type == pdfium_sys::FPDF_FORMFIELD_RADIOBUTTON as i32;
+            let checked = is_checkable.then(|| {
+                (unsafe { ffi!(FPDFAnnot_IsChecked(form.handle, annot)) }) != 0
+                    || appearance_state
+                        .as_ref()
+                        .is_some_and(|state| state != "Off")
+            });
+            let control_count = is_checkable
+                .then(|| unsafe { ffi!(FPDFAnnot_GetFormControlCount(form.handle, annot)) })
+                .filter(|value| *value >= 0);
+            let control_index = is_checkable
+                .then(|| unsafe { ffi!(FPDFAnnot_GetFormControlIndex(form.handle, annot)) })
+                .filter(|value| *value >= 0);
+
+            out.push(PdfFormField {
+                id,
+                field_type: form_field_type_name(raw_type).to_owned(),
+                page: page_number,
+                annotation_index,
+                widget_index,
+                object_number,
+                name,
+                alternate_name,
+                value,
+                export_value,
+                field_flags: unsafe { ffi!(FPDFAnnot_GetFormFieldFlags(form.handle, annot)) },
+                control_count,
+                control_index,
+                checked,
+                rect,
+                options,
+                selected_options,
+            });
+            if !parent.is_null() {
+                unsafe { ffi!(FPDFPage_CloseAnnot(parent)) };
+            }
+            unsafe { ffi!(FPDFPage_CloseAnnot(annot)) };
+            widget_index += 1;
+        }
+        out
+    }
+}
+
+fn form_field_type_name(field_type: i32) -> &'static str {
+    match field_type as u32 {
+        pdfium_sys::FPDF_FORMFIELD_PUSHBUTTON => "pushbutton",
+        pdfium_sys::FPDF_FORMFIELD_CHECKBOX => "checkbox",
+        pdfium_sys::FPDF_FORMFIELD_RADIOBUTTON => "radio",
+        pdfium_sys::FPDF_FORMFIELD_COMBOBOX => "combobox",
+        pdfium_sys::FPDF_FORMFIELD_LISTBOX => "listbox",
+        pdfium_sys::FPDF_FORMFIELD_TEXTFIELD => "text",
+        pdfium_sys::FPDF_FORMFIELD_SIGNATURE => "signature",
+        _ => "unknown",
+    }
+}
+
+fn first_present<const N: usize>(values: [Option<String>; N]) -> Option<String> {
+    values.into_iter().flatten().find(|value| !value.is_empty())
+}
+
+fn read_form_string(
+    form: pdfium_sys::FPDF_FORMHANDLE,
+    annot: pdfium_sys::FPDF_ANNOTATION,
+    mut getter: impl FnMut(
+        pdfium_sys::FPDF_FORMHANDLE,
+        pdfium_sys::FPDF_ANNOTATION,
+        *mut u16,
+        std::os::raw::c_ulong,
+    ) -> std::os::raw::c_ulong,
+) -> Option<String> {
+    let needed = getter(form, annot, std::ptr::null_mut(), 0) as usize;
+    if needed < 2 {
+        return None;
+    }
+    let mut buffer = vec![0u16; needed.div_ceil(2)];
+    let written = getter(
+        form,
+        annot,
+        buffer.as_mut_ptr(),
+        needed as std::os::raw::c_ulong,
+    ) as usize;
+    if written < 2 {
+        return None;
+    }
+    let units = (written / 2).min(buffer.len());
+    let end = units.saturating_sub(usize::from(buffer.get(units.saturating_sub(1)) == Some(&0)));
+    let value = String::from_utf16_lossy(&buffer[..end]);
+    (!value.is_empty()).then_some(value)
+}
+
+fn read_form_option_label(
+    form: pdfium_sys::FPDF_FORMHANDLE,
+    annot: pdfium_sys::FPDF_ANNOTATION,
+    index: i32,
+) -> Option<String> {
+    read_form_string(form, annot, |handle, annotation, buffer, len| unsafe {
+        ffi!(FPDFAnnot_GetOptionLabel(
+            handle, annotation, index, buffer, len
+        ))
+    })
+}
+
+fn annotation_rect(
+    page: &Page<'_, '_>,
+    annot: pdfium_sys::FPDF_ANNOTATION,
+    view_box: &RectF,
+) -> Option<RectF> {
+    let mut rect = pdfium_sys::FS_RECTF::default();
+    (unsafe { ffi!(FPDFAnnot_GetRect(annot, &mut rect)) } != 0).then(|| {
+        page.bounds_to_viewport(
+            view_box,
+            &RectF {
+                left: rect.left,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+            },
+        )
+    })
 }
 
 fn annotation_subtype_name(subtype: pdfium_sys::FPDF_ANNOTATION_SUBTYPE) -> &'static str {

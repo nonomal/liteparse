@@ -39,6 +39,8 @@ export interface LiteParseConfig {
   extractLinks: boolean;
   /** Extract all PDF annotations into each parsed page (default: false). */
   extractAnnotations: boolean;
+  /** Extract AcroForm widget fields and values (default: false). */
+  extractFormFields: boolean;
   preserveVerySmallText: boolean;
   password?: string;
   quiet: boolean;
@@ -206,6 +208,8 @@ export interface ParsedPage {
   vectorGraphics?: VectorGraphics;
   /** Present only when `extractAnnotations` is enabled. */
   annotations?: DocumentAnnotation[];
+  /** Present only when `extractFormFields` is enabled. */
+  formFields?: FormField[];
 }
 
 export interface VectorGraphics {
@@ -249,6 +253,26 @@ export interface DocumentAnnotation {
   uri?: string;
 }
 
+export interface FormField {
+  id: string;
+  type: string;
+  page: number;
+  annotationIndex: number;
+  widgetIndex: number;
+  objectNumber?: number;
+  name?: string;
+  alternateName?: string;
+  value?: string;
+  exportValue?: string;
+  fieldFlags: number;
+  controlCount?: number;
+  controlIndex?: number;
+  checked?: boolean;
+  rect?: AnnotationRect;
+  options: string[];
+  selectedOptions: string[];
+}
+
 export interface ExtractedImage {
   /** Reference id used in the markdown output (e.g. `![](image_p1_0.png)` → `"p1_0"`). */
   id: string;
@@ -277,6 +301,8 @@ export interface ParseResult {
   images: ExtractedImage[];
   /** Embedded image objects that PDFium could not render or encode. */
   imageErrorCount: number;
+  /** PDFium form type, present only when `extractFormFields` is enabled. */
+  formType?: number;
 }
 
 export interface ScreenshotResult {
@@ -386,6 +412,7 @@ export class LiteParse {
       imageOutputDir: userConfig.imageOutputDir,
       extractLinks: userConfig.extractLinks,
       extractAnnotations: userConfig.extractAnnotations,
+      extractFormFields: userConfig.extractFormFields,
       preserveVerySmallText: userConfig.preserveVerySmallText,
       password: userConfig.password,
       quiet: userConfig.quiet,
@@ -419,6 +446,7 @@ export class LiteParse {
       imageOutputDir: resolved.imageOutputDir ?? undefined,
       extractLinks: resolved.extractLinks ?? true,
       extractAnnotations: resolved.extractAnnotations ?? false,
+      extractFormFields: resolved.extractFormFields ?? false,
       preserveVerySmallText: resolved.preserveVerySmallText ?? false,
       password: resolved.password ?? undefined,
       quiet: resolved.quiet ?? false,
@@ -444,6 +472,7 @@ export class LiteParse {
       text: result.text,
       images: (result.images ?? []).map(toImage),
       imageErrorCount: result.imageErrorCount ?? 0,
+      formType: result.formType,
     };
   }
 
@@ -547,6 +576,25 @@ function toPage(p: NativeParsedPage): ParsedPage {
     complexity: p.complexity ? toComplexity(p.complexity) : undefined,
     vectorGraphics: p.vectorGraphics ?? undefined,
     annotations: p.annotations,
+    formFields: p.formFields?.map((field) => ({
+      id: field.id,
+      type: field.fieldType,
+      page: field.page,
+      annotationIndex: field.annotationIndex,
+      widgetIndex: field.widgetIndex,
+      objectNumber: field.objectNumber,
+      name: field.name,
+      alternateName: field.alternateName,
+      value: field.value,
+      exportValue: field.exportValue,
+      fieldFlags: field.fieldFlags,
+      controlCount: field.controlCount,
+      controlIndex: field.controlIndex,
+      checked: field.checked,
+      rect: field.rect,
+      options: field.options,
+      selectedOptions: field.selectedOptions,
+    })),
   };
 }
 

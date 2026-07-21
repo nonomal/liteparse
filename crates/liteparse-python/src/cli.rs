@@ -79,6 +79,9 @@ struct ParseCommand {
     /// Include all PDF annotations as page-scoped structured data.
     #[arg(long)]
     extract_annotations: bool,
+    /// Include AcroForm widget fields and values.
+    #[arg(long)]
+    extract_form_fields: bool,
     /// Include per-page complexity signals as a `complexity` object on each
     /// page of JSON output. Off by default.
     #[arg(long)]
@@ -248,6 +251,7 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 image_output_dir: cmd.image_output_dir.clone(),
                 extract_links: !cmd.no_links,
                 extract_annotations: cmd.extract_annotations,
+                extract_form_fields: cmd.extract_form_fields,
                 include_complexity: cmd.complexity,
                 extract_text_metadata: cmd.extract_text_metadata,
                 extract_vector_graphics: cmd.extract_vector_graphics,
@@ -268,6 +272,7 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     &result.images,
                     result.image_error_count,
                     lp.config().extract_text_metadata,
+                    result.form_type,
                 )?,
                 OutputFormat::Text => text::format_text(&result.pages),
                 OutputFormat::Markdown => result.text.clone(),
@@ -388,6 +393,7 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                                     &result.images,
                                     result.image_error_count,
                                     lp.config().extract_text_metadata,
+                                    result.form_type,
                                 )
                                 .map_err(|e| e.into()),
                                 OutputFormat::Text => Ok(text::format_text(&result.pages)),

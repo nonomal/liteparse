@@ -62,6 +62,7 @@ parser = LiteParse(
     extract_links=True,            # Render [text](url) links in markdown output
     extract_vector_graphics=False, # Opt-in shapes + merged H/V lines per page
     extract_annotations=False,     # Include page annotations in structured output
+    extract_form_fields=False,      # Include AcroForm widget fields and values
     preserve_very_small_text=False, # Keep tiny text
     extract_text_metadata=False,    # Opt in to MCID, font metrics, colors, char codes, and trailing_space_generated
     password=None,                 # Password for protected documents
@@ -150,6 +151,7 @@ The Python package includes the `lit` CLI:
 lit parse document.pdf
 lit parse document.pdf --format json -o output.json
 lit parse document.pdf --format json --extract-annotations
+lit parse document.pdf --format json --extract-form-fields
 lit screenshot document.pdf -o ./screenshots
 lit batch-parse ./input ./output
 lit is-complex document.pdf

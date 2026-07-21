@@ -4,6 +4,7 @@ from .parser import LiteParse, search_items
 from .types import (
     AnnotationRect,
     DocumentAnnotation,
+    FormField,
     ExtractedImage,
     ImageRect,
     LayoutComplexityStats,
@@ -28,6 +29,7 @@ __all__ = [
     "LiteParse",
     "AnnotationRect",
     "DocumentAnnotation",
+    "FormField",
     "LiteParseConfig",
     "ParseResult",
     "ParsedPage",

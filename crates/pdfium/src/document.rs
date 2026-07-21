@@ -13,6 +13,15 @@ pub struct Document<'lib> {
     pub(crate) _lib: std::marker::PhantomData<&'lib Library>,
 }
 
+/// PDFium's form-fill environment for an open document. The callback table
+/// must remain alive until the handle is closed, even though LiteParse leaves
+/// every callback null and uses the environment for read-only field access.
+pub struct FormEnvironment<'doc, 'lib: 'doc> {
+    pub(crate) handle: pdfium_sys::FPDF_FORMHANDLE,
+    _callbacks: Box<pdfium_sys::FPDF_FORMFILLINFO>,
+    _doc: std::marker::PhantomData<&'doc Document<'lib>>,
+}
+
 /// One entry in the document's outline (bookmarks tree).
 #[derive(Debug, Clone)]
 pub struct OutlineEntry {
@@ -33,6 +42,31 @@ pub struct OutlineEntry {
 impl<'lib> Document<'lib> {
     pub fn page_count(&self) -> i32 {
         unsafe { ffi!(FPDF_GetPageCount(self.handle)) }
+    }
+
+    pub fn form_type(&self) -> i32 {
+        unsafe { ffi!(FPDF_GetFormType(self.handle)) }
+    }
+
+    /// Initialize read-only AcroForm access. Returns `None` for documents with
+    /// no form catalog or when PDFium rejects the form-fill environment.
+    pub fn form_environment(&self) -> Option<FormEnvironment<'_, 'lib>> {
+        if self.form_type() == 0 {
+            return None;
+        }
+        let mut callbacks = Box::new(pdfium_sys::FPDF_FORMFILLINFO::default());
+        callbacks.version = 1;
+        let handle = unsafe {
+            ffi!(FPDFDOC_InitFormFillEnvironment(
+                self.handle,
+                &mut *callbacks
+            ))
+        };
+        (!handle.is_null()).then_some(FormEnvironment {
+            handle,
+            _callbacks: callbacks,
+            _doc: std::marker::PhantomData,
+        })
     }
 
     pub fn page(&self, index: i32) -> Result<Page<'_, 'lib>, PdfiumError> {
@@ -88,6 +122,12 @@ impl<'lib> Document<'lib> {
 
             cur = unsafe { ffi!(FPDFBookmark_GetNextSibling(self.handle, cur)) };
         }
+    }
+}
+
+impl Drop for FormEnvironment<'_, '_> {
+    fn drop(&mut self) {
+        unsafe { ffi!(FPDFDOC_ExitFormFillEnvironment(self.handle)) };
     }
 }
 

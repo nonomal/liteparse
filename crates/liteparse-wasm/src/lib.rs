@@ -57,6 +57,7 @@ pub struct LiteParseConfig {
     extract_images: Option<bool>,
     extract_links: Option<bool>,
     extract_annotations: Option<bool>,
+    extract_form_fields: Option<bool>,
     ocr_failure_fatal: Option<bool>,
     ocr_hedge_delays_ms: Option<Vec<u64>>,
     preserve_very_small_text: Option<bool>,
@@ -146,6 +147,9 @@ impl LiteParseConfig {
         if let Some(v) = self.extract_annotations {
             cfg.extract_annotations = v;
         }
+        if let Some(v) = self.extract_form_fields {
+            cfg.extract_form_fields = v;
+        }
         if let Some(v) = self.ocr_failure_fatal {
             cfg.ocr_failure_fatal = v;
         }
@@ -212,6 +216,7 @@ impl LiteParseConfig {
             extract_images: Some(cfg.extract_images),
             extract_links: Some(cfg.extract_links),
             extract_annotations: Some(cfg.extract_annotations),
+            extract_form_fields: Some(cfg.extract_form_fields),
             ocr_failure_fatal: Some(cfg.ocr_failure_fatal),
             ocr_hedge_delays_ms: Some(cfg.ocr_hedge_delays_ms.clone()),
             preserve_very_small_text: Some(cfg.preserve_very_small_text),
@@ -285,6 +290,8 @@ pub struct ParsedPage {
     pub vector_graphics: Option<VectorGraphics>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotations: Option<Vec<DocumentAnnotation>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub form_fields: Option<Vec<FormField>>,
 }
 
 #[derive(Serialize, Tsify)]
@@ -386,11 +393,66 @@ impl DocumentAnnotation {
 #[derive(Serialize, Tsify)]
 #[tsify(into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
+pub struct FormField {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub field_type: String,
+    pub page: u32,
+    pub annotation_index: i32,
+    pub widget_index: i32,
+    pub object_number: Option<i32>,
+    pub name: Option<String>,
+    pub alternate_name: Option<String>,
+    pub value: Option<String>,
+    pub export_value: Option<String>,
+    pub field_flags: i32,
+    pub control_count: Option<i32>,
+    pub control_index: Option<i32>,
+    pub checked: Option<bool>,
+    pub rect: Option<AnnotationRect>,
+    pub options: Vec<String>,
+    pub selected_options: Vec<String>,
+}
+
+impl FormField {
+    fn from_rust(field: &liteparse::types::FormField) -> Self {
+        Self {
+            id: field.id.clone(),
+            field_type: field.field_type.clone(),
+            page: field.page,
+            annotation_index: field.annotation_index,
+            widget_index: field.widget_index,
+            object_number: field.object_number,
+            name: field.name.clone(),
+            alternate_name: field.alternate_name.clone(),
+            value: field.value.clone(),
+            export_value: field.export_value.clone(),
+            field_flags: field.field_flags,
+            control_count: field.control_count,
+            control_index: field.control_index,
+            checked: field.checked,
+            rect: field.rect.as_ref().map(|rect| AnnotationRect {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+            }),
+            options: field.options.clone(),
+            selected_options: field.selected_options.clone(),
+        }
+    }
+}
+
+#[derive(Serialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
 pub struct ParseResult {
     pub pages: Vec<ParsedPage>,
     pub text: String,
     pub images: Vec<ExtractedImage>,
     pub image_error_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub form_type: Option<i32>,
 }
 
 #[derive(Serialize, Tsify)]
@@ -677,6 +739,10 @@ impl LiteParse {
                         .map(DocumentAnnotation::from_rust)
                         .collect()
                 }),
+                form_fields: p
+                    .form_fields
+                    .as_ref()
+                    .map(|fields| fields.iter().map(FormField::from_rust).collect()),
             })
             .collect();
 
@@ -708,6 +774,7 @@ impl LiteParse {
             text: result.text.clone(),
             images,
             image_error_count: result.image_error_count,
+            form_type: result.form_type,
         })
     }
 

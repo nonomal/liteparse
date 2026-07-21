@@ -9,6 +9,7 @@ from liteparse._liteparse import search_items as _native_search_items
 from .types import (
     AnnotationRect,
     DocumentAnnotation,
+    FormField,
     ExtractedImage,
     ImageRect,
     LayoutComplexityStats,
@@ -101,6 +102,7 @@ def _convert_native_result(native_result: Any) -> ParseResult:
         native_complexity = getattr(native_page, "complexity", None)
         native_vectors = getattr(native_page, "vector_graphics", None)
         native_annotations = getattr(native_page, "annotations", None)
+        native_form_fields = getattr(native_page, "form_fields", None)
         pages.append(
             ParsedPage(
                 page_num=native_page.page_num,
@@ -179,6 +181,32 @@ def _convert_native_result(native_result: Any) -> ParseResult:
                     if native_annotations is not None
                     else None
                 ),
+                form_fields=(
+                    [
+                        FormField(
+                            id=form.id,
+                            field_type=form.field_type,
+                            page=form.page,
+                            annotation_index=form.annotation_index,
+                            widget_index=form.widget_index,
+                            object_number=form.object_number,
+                            name=form.name,
+                            alternate_name=form.alternate_name,
+                            value=form.value,
+                            export_value=form.export_value,
+                            field_flags=form.field_flags,
+                            control_count=form.control_count,
+                            control_index=form.control_index,
+                            checked=form.checked,
+                            rect=(AnnotationRect(form.rect.x, form.rect.y, form.rect.width, form.rect.height) if form.rect is not None else None),
+                            options=list(form.options),
+                            selected_options=list(form.selected_options),
+                        )
+                        for form in native_form_fields
+                    ]
+                    if native_form_fields is not None
+                    else None
+                ),
             )
         )
     images = [
@@ -207,6 +235,7 @@ def _convert_native_result(native_result: Any) -> ParseResult:
         text=native_result.text,
         images=images,
         image_error_count=getattr(native_result, "image_error_count", 0),
+        form_type=getattr(native_result, "form_type", None),
     )
 
 
@@ -244,6 +273,7 @@ class LiteParse:
         image_output_dir: Optional[Union[str, Path]] = None,
         extract_links: Optional[bool] = None,
         extract_annotations: Optional[bool] = None,
+        extract_form_fields: Optional[bool] = None,
         ocr_failure_fatal: Optional[bool] = None,
         ocr_hedge_delays_ms: Optional[List[int]] = None,
         emit_word_boxes: Optional[bool] = None,
@@ -281,6 +311,8 @@ class LiteParse:
                 ``image_mode`` controls Markdown presentation independently.
             extract_annotations: Include all PDF annotations as page-scoped
                 structured data (default: False).
+            extract_form_fields: Include AcroForm widget fields and values as
+                page-scoped structured data (default: False).
             ocr_failure_fatal: Whether a systemic OCR failure (every OCR task
                 failed and at least one was a text-sparse page) aborts the whole
                 parse (default: True). Set False to keep already-recovered native
@@ -353,6 +385,8 @@ class LiteParse:
             kwargs["extract_links"] = extract_links
         if extract_annotations is not None:
             kwargs["extract_annotations"] = extract_annotations
+        if extract_form_fields is not None:
+            kwargs["extract_form_fields"] = extract_form_fields
         if ocr_failure_fatal is not None:
             kwargs["ocr_failure_fatal"] = ocr_failure_fatal
         if ocr_hedge_delays_ms is not None:
@@ -505,6 +539,7 @@ class LiteParse:
             image_output_dir=cfg.image_output_dir,
             extract_links=cfg.extract_links,
             extract_annotations=cfg.extract_annotations,
+            extract_form_fields=cfg.extract_form_fields,
             ocr_failure_fatal=cfg.ocr_failure_fatal,
             ocr_hedge_delays_ms=list(cfg.ocr_hedge_delays_ms),
             emit_word_boxes=cfg.emit_word_boxes,

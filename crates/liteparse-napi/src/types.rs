@@ -5,7 +5,8 @@ use napi_derive::napi;
 use liteparse::config::{CropBox, ImageMode, LiteParseConfig, OutputFormat};
 use liteparse::parser::ParseResult;
 use liteparse::types::{
-    DocumentAnnotation, GraphicPrimitive, Page, ParsedPage, Rect, TextItem, VectorGraphics, WordBox,
+    DocumentAnnotation, FormField, GraphicPrimitive, Page, ParsedPage, Rect, TextItem,
+    VectorGraphics, WordBox,
 };
 
 // ---------------------------------------------------------------------------
@@ -56,6 +57,8 @@ pub struct JsLiteParseConfig {
     pub extract_links: Option<bool>,
     /// Extract all PDF annotations as page-scoped structured data.
     pub extract_annotations: Option<bool>,
+    /// Extract AcroForm widget fields and values.
+    pub extract_form_fields: Option<bool>,
     /// Whether a systemic OCR failure aborts the whole parse (default true).
     /// Set false to keep already-recovered native text and return partial
     /// results when OCR is unavailable, instead of rejecting.
@@ -161,6 +164,9 @@ impl JsLiteParseConfig {
         if let Some(v) = self.extract_annotations {
             cfg.extract_annotations = v;
         }
+        if let Some(v) = self.extract_form_fields {
+            cfg.extract_form_fields = v;
+        }
         if let Some(v) = self.ocr_failure_fatal {
             cfg.ocr_failure_fatal = v;
         }
@@ -225,6 +231,7 @@ impl JsLiteParseConfig {
             image_output_dir: cfg.image_output_dir.clone(),
             extract_links: Some(cfg.extract_links),
             extract_annotations: Some(cfg.extract_annotations),
+            extract_form_fields: Some(cfg.extract_form_fields),
             ocr_failure_fatal: Some(cfg.ocr_failure_fatal),
             ocr_hedge_delays_ms: Some(
                 cfg.ocr_hedge_delays_ms
@@ -484,6 +491,7 @@ impl JsPageInput {
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
             annotations: None,
+            form_fields: None,
         }
     }
 }
@@ -504,6 +512,7 @@ pub struct JsParsedPage {
     pub complexity: Option<JsPageComplexityStats>,
     pub vector_graphics: Option<JsVectorGraphics>,
     pub annotations: Option<Vec<JsDocumentAnnotation>>,
+    pub form_fields: Option<Vec<JsFormField>>,
 }
 
 #[napi(object)]
@@ -619,6 +628,52 @@ pub struct JsDocumentAnnotation {
     pub uri: Option<String>,
 }
 
+#[napi(object)]
+#[derive(Clone)]
+pub struct JsFormField {
+    pub id: String,
+    pub field_type: String,
+    pub page: u32,
+    pub annotation_index: i32,
+    pub widget_index: i32,
+    pub object_number: Option<i32>,
+    pub name: Option<String>,
+    pub alternate_name: Option<String>,
+    pub value: Option<String>,
+    pub export_value: Option<String>,
+    pub field_flags: i32,
+    pub control_count: Option<i32>,
+    pub control_index: Option<i32>,
+    pub checked: Option<bool>,
+    pub rect: Option<JsAnnotationRect>,
+    pub options: Vec<String>,
+    pub selected_options: Vec<String>,
+}
+
+impl JsFormField {
+    fn from_rust(field: &FormField) -> Self {
+        Self {
+            id: field.id.clone(),
+            field_type: field.field_type.clone(),
+            page: field.page,
+            annotation_index: field.annotation_index,
+            widget_index: field.widget_index,
+            object_number: field.object_number,
+            name: field.name.clone(),
+            alternate_name: field.alternate_name.clone(),
+            value: field.value.clone(),
+            export_value: field.export_value.clone(),
+            field_flags: field.field_flags,
+            control_count: field.control_count,
+            control_index: field.control_index,
+            checked: field.checked,
+            rect: field.rect.as_ref().map(JsAnnotationRect::from_rust),
+            options: field.options.clone(),
+            selected_options: field.selected_options.clone(),
+        }
+    }
+}
+
 impl JsDocumentAnnotation {
     fn from_rust(annotation: &DocumentAnnotation) -> Self {
         Self {
@@ -665,6 +720,10 @@ impl JsParsedPage {
                     .map(JsDocumentAnnotation::from_rust)
                     .collect()
             }),
+            form_fields: page
+                .form_fields
+                .as_ref()
+                .map(|fields| fields.iter().map(JsFormField::from_rust).collect()),
         }
     }
 }
@@ -680,6 +739,7 @@ pub struct JsParseResult {
     pub text: String,
     pub images: Vec<JsExtractedImage>,
     pub image_error_count: u32,
+    pub form_type: Option<i32>,
 }
 
 #[napi(object)]
@@ -809,6 +869,7 @@ impl JsParseResult {
                 .collect(),
             text: result.text.clone(),
             image_error_count: result.image_error_count,
+            form_type: result.form_type,
             images: result
                 .images
                 .iter()

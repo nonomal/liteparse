@@ -66,6 +66,7 @@ program
   .option("--extract-images", "Extract embedded image bytes and metadata")
   .option("--no-links", "Disable hyperlink extraction (emit plain anchor text)")
   .option("--extract-annotations", "Include all PDF annotations in page output")
+  .option("--extract-form-fields", "Include AcroForm widget fields and values")
   .option("--ocr-server-url <url>", "HTTP OCR server URL")
   .option(
     "--ocr-server-header <header>",
@@ -118,6 +119,7 @@ program
       if (opts.extractImages) config.extractImages = true;
       if (opts.links === false) config.extractLinks = false;
       if (opts.extractAnnotations) config.extractAnnotations = true;
+      if (opts.extractFormFields) config.extractFormFields = true;
       if (opts.ocrServerUrl)
         config.ocrServerUrl = opts.ocrServerUrl as string;
       if (opts.ocrServerHeader)
@@ -316,6 +318,7 @@ program
   )
   .option("--extract-images", "Extract embedded image bytes and metadata")
   .option("--extract-annotations", "Include all PDF annotations in page output")
+  .option("--extract-form-fields", "Include AcroForm widget fields and values")
   .option(
     "--extract-vector-graphics",
     "Include page-scoped vector shapes and merged horizontal/vertical lines",
@@ -344,6 +347,7 @@ program
         if (opts.extractTextMetadata) config.extractTextMetadata = true;
         if (opts.extractImages) config.extractImages = true;
         if (opts.extractAnnotations) config.extractAnnotations = true;
+        if (opts.extractFormFields) config.extractFormFields = true;
         if (opts.extractVectorGraphics) config.extractVectorGraphics = true;
 
         const parser = new LiteParse(config);

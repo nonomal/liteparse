@@ -63,6 +63,7 @@ const parser = new LiteParse({
   extractLinks: true,            // Render [text](url) links in markdown output
   extractVectorGraphics: false,  // Opt-in shapes + merged H/V lines per page
   extractAnnotations: false,     // Include page annotations in structured output
+  extractFormFields: false,      // Include AcroForm widget fields and values
   preserveVerySmallText: false,  // Keep tiny text
   extractTextMetadata: false,    // Opt in to MCID, font metrics, colors, char codes, and trailingSpaceGenerated
   password: undefined,           // Password for protected documents
@@ -157,6 +158,7 @@ The npm package includes the `lit` CLI:
 lit parse document.pdf
 lit parse document.pdf --format json -o output.json
 lit parse document.pdf --format json --extract-annotations
+lit parse document.pdf --format json --extract-form-fields
 lit screenshot document.pdf -o ./screenshots
 lit batch-parse ./input ./output
 lit is-complex document.pdf

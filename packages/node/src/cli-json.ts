@@ -1,5 +1,6 @@
 import type {
   DocumentAnnotation,
+  FormField,
   ExtractedImage,
   PageComplexityStats,
   ParseResult,
@@ -131,6 +132,28 @@ function annotationToCliJson(annotation: DocumentAnnotation) {
   };
 }
 
+function formFieldToCliJson(field: FormField) {
+  return {
+    id: field.id,
+    type: field.type,
+    page: field.page,
+    annotation_index: field.annotationIndex,
+    widget_index: field.widgetIndex,
+    ...(field.objectNumber !== undefined ? { object_number: field.objectNumber } : {}),
+    ...(field.name !== undefined ? { name: field.name } : {}),
+    ...(field.alternateName !== undefined ? { alternate_name: field.alternateName } : {}),
+    ...(field.value !== undefined ? { value: field.value } : {}),
+    ...(field.exportValue !== undefined ? { export_value: field.exportValue } : {}),
+    field_flags: field.fieldFlags,
+    ...(field.controlCount !== undefined ? { control_count: field.controlCount } : {}),
+    ...(field.controlIndex !== undefined ? { control_index: field.controlIndex } : {}),
+    ...(field.checked !== undefined ? { checked: field.checked } : {}),
+    ...(field.rect !== undefined ? { rect: field.rect } : {}),
+    ...(field.options.length ? { options: field.options } : {}),
+    ...(field.selectedOptions.length ? { selected_options: field.selectedOptions } : {}),
+  };
+}
+
 function imageToCliJson(image: ExtractedImage) {
   return {
     id: image.id,
@@ -171,6 +194,9 @@ export function parseResultToCliJson(result: ParseResult) {
       ...(page.annotations !== undefined
         ? { annotations: page.annotations.map(annotationToCliJson) }
         : {}),
+      ...(page.formFields !== undefined
+        ? { form_fields: page.formFields.map(formFieldToCliJson) }
+        : {}),
     })),
     ...(result.images.length
       ? { images: result.images.map(imageToCliJson) }
@@ -178,5 +204,6 @@ export function parseResultToCliJson(result: ParseResult) {
     ...(result.imageErrorCount
       ? { image_error_count: result.imageErrorCount }
       : {}),
+    ...(result.formType !== undefined ? { form_type: result.formType } : {}),
   };
 }

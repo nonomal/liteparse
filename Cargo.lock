@@ -2063,7 +2063,7 @@ dependencies = [
 
 [[package]]
 name = "liteparse-pdfium"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "blake3",
  "liteparse-pdfium-sys",
@@ -2071,7 +2071,7 @@ dependencies = [
 
 [[package]]
 name = "liteparse-pdfium-sys"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "bindgen",
  "flate2",

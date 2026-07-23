@@ -43,20 +43,13 @@ pub(crate) struct RenderedPage {
     pub pixels: Vec<u8>,
     pub width: u32,
     pub height: u32,
-    /// DPI this page was actually rendered at. Differs from the configured
-    /// DPI when the long-edge cap kicked in (see `MAX_OCR_RENDER_LONG_EDGE_PX`);
-    /// OCR pixel coordinates must be mapped back to PDF points with THIS value.
+    /// DPI this page was actually rendered at.
     pub dpi: f32,
 }
 
 /// Why a page was flagged as needing more than the cheap text-only path.
 /// Multiple reasons can apply to one page (e.g. a sparse page whose little
 /// text is also garbled). Empty exactly when `needs_ocr` is false.
-///
-/// This is the discriminator a caller routes on: a scan goes to OCR, dense
-/// vector text to a vector-aware pass, and so on. New variants will be added
-/// as the routing function learns to recommend heavier pipelines (tables,
-/// charts, LLM passes), so callers should treat unknown variants leniently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ComplexityReason {
@@ -418,10 +411,9 @@ fn count_columns(region: &Region, total_items: usize) -> usize {
 ///
 /// The pdfium `Document` holds raw pointers that are not `Send`, so callers must
 /// drop it before awaiting the OCR engine.
-/// Cap on the rendered long edge (in pixels) for OCR page rasters.
 ///
-/// Large-format pages (architectural / engineering sheets, e.g. 24x36in) at the
-/// configured DPI decode to multi-hundred-MB uncompressed rasters;
+/// Cap on the rendered long edge (in pixels) for OCR page rasters
+/// to avoid excessive memory usage.
 pub(crate) const MAX_OCR_RENDER_LONG_EDGE_PX: f32 = 4096.0;
 
 pub(crate) fn render_pages_for_ocr(

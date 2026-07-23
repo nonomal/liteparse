@@ -7,16 +7,19 @@ import type {
   TextItem,
   VectorGraphics,
   StructureTreeElement,
+  XfaPacket,
 } from "./lib.js";
 
-function textItemToCliJson(item: TextItem) {
+function textItemToCliJson(item: TextItem, extractTextMetadata: boolean) {
   return {
     text: item.text,
     x: item.x,
     y: item.y,
     width: item.width,
     height: item.height,
-    ...(item.rotation !== undefined ? { rotation: item.rotation } : {}),
+    ...(extractTextMetadata && item.rotation !== undefined
+      ? { rotation: item.rotation }
+      : {}),
     ...(item.fontName !== undefined ? { font_name: item.fontName } : {}),
     ...(item.fontSize !== undefined ? { font_size: item.fontSize } : {}),
     ...(item.fontHeight !== undefined ? { font_height: item.fontHeight } : {}),
@@ -169,6 +172,15 @@ function formFieldToCliJson(field: FormField) {
   };
 }
 
+function xfaPacketToCliJson(packet: XfaPacket) {
+  return {
+    index: packet.index,
+    ...(packet.name !== undefined ? { name: packet.name } : {}),
+    content_length: packet.contentLength,
+    ...(packet.content !== undefined ? { content: packet.content } : {}),
+  };
+}
+
 function imageToCliJson(image: ExtractedImage) {
   return {
     id: image.id,
@@ -192,14 +204,30 @@ function imageToCliJson(image: ExtractedImage) {
 }
 
 /** Project the camelCase Node API result into the Rust CLI JSON schema. */
-export function parseResultToCliJson(result: ParseResult) {
+export function parseResultToCliJson(
+  result: ParseResult,
+  options: { extractTextMetadata?: boolean } = {},
+) {
+  const extractTextMetadata = options.extractTextMetadata ?? false;
   return {
     pages: result.pages.map((page) => ({
       page: page.pageNum,
       width: page.width,
       height: page.height,
+      ...(page.contentBounds
+        ? {
+            content_bounds: {
+              x: page.contentBounds.x,
+              y: page.contentBounds.y,
+              width: page.contentBounds.width,
+              height: page.contentBounds.height,
+            },
+          }
+        : {}),
       text: page.text,
-      text_items: page.textItems.map(textItemToCliJson),
+      text_items: page.textItems.map((item) =>
+        textItemToCliJson(item, extractTextMetadata),
+      ),
       ...(page.complexity
         ? { complexity: complexityToCliJson(page.complexity) }
         : {}),
@@ -227,5 +255,8 @@ export function parseResultToCliJson(result: ParseResult) {
       ? { image_error_count: result.imageErrorCount }
       : {}),
     ...(result.formType !== undefined ? { form_type: result.formType } : {}),
+    ...(result.xfaPackets !== undefined
+      ? { xfa_packets: result.xfaPackets.map(xfaPacketToCliJson) }
+      : {}),
   };
 }

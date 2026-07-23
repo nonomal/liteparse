@@ -100,7 +100,7 @@ struct ParseCommand {
     num_workers: Option<usize>,
 
     /// How to surface raster images in markdown output:
-    /// `off` strips them, `placeholder` (default) emits `![](image_pN_K.png)`
+    /// `off` strips them, `placeholder` (default) emits `![](img_pN_K.png)`
     /// references in reading order, and `embed` preserves the same presentation.
     /// Use `--extract-images` to extract image bytes and metadata.
     #[arg(long, default_value = "placeholder")]

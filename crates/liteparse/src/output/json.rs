@@ -119,36 +119,35 @@ pub(crate) fn build_json(pages: &[ParsedPage], extract_text_metadata: bool) -> P
                 text_items: page
                     .text_items
                     .iter()
-                    .map(|item| JsonTextItem {
-                        text: item.text.clone(),
-                        x: item.x,
-                        y: item.y,
-                        width: item.width,
-                        height: item.height,
-                        rotation: Some(item.rotation),
-                        font_name: item.font_name.clone(),
-                        font_size: item.font_size,
-                        font_height: extract_text_metadata.then_some(item.font_height).flatten(),
-                        font_ascent: extract_text_metadata.then_some(item.font_ascent).flatten(),
-                        font_descent: extract_text_metadata.then_some(item.font_descent).flatten(),
-                        font_weight: extract_text_metadata.then_some(item.font_weight).flatten(),
-                        text_width: extract_text_metadata.then_some(item.text_width).flatten(),
-                        font_is_buggy: extract_text_metadata.then_some(item.font_is_buggy),
-                        mcid: extract_text_metadata.then_some(item.mcid).flatten(),
-                        fill_color: extract_text_metadata
-                            .then(|| item.fill_color.clone())
-                            .flatten(),
-                        stroke_color: extract_text_metadata
-                            .then(|| item.stroke_color.clone())
-                            .flatten(),
-                        char_codes: if extract_text_metadata {
-                            item.char_codes.clone()
-                        } else {
-                            Vec::new()
-                        },
-                        trailing_space_generated: extract_text_metadata
-                            && item.trailing_space_generated,
-                        confidence: item.confidence.or(Some(1.0)),
+                    .map(|item| {
+                        let meta = item.text_metadata(extract_text_metadata);
+                        JsonTextItem {
+                            text: item.text.clone(),
+                            x: item.x,
+                            y: item.y,
+                            width: item.width,
+                            height: item.height,
+                            // Not part of TextMetadata: the API surfaces always
+                            // expose rotation (it predates the metadata flag);
+                            // only the CLI JSON gates it to stay byte-stable.
+                            rotation: extract_text_metadata.then_some(item.rotation),
+                            font_name: item.font_name.clone(),
+                            font_size: item.font_size,
+                            font_height: meta.font_height,
+                            font_ascent: meta.font_ascent,
+                            font_descent: meta.font_descent,
+                            font_weight: meta.font_weight,
+                            text_width: meta.text_width,
+                            font_is_buggy: meta.font_is_buggy,
+                            mcid: meta.mcid,
+                            fill_color: meta.fill_color.map(str::to_owned),
+                            stroke_color: meta.stroke_color.map(str::to_owned),
+                            char_codes: meta.char_codes.map(<[u32]>::to_vec).unwrap_or_default(),
+                            trailing_space_generated: meta
+                                .trailing_space_generated
+                                .unwrap_or(false),
+                            confidence: item.confidence.or(Some(1.0)),
+                        }
                     })
                     .collect(),
                 complexity: page.complexity.clone(),
@@ -359,7 +358,7 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_str(&format_json(&[page(vec![text_item])]).unwrap()).unwrap();
         let item = &value["pages"][0]["text_items"][0];
-        assert_eq!(item["rotation"], 0.0);
+        assert!(item.get("rotation").is_none());
         assert!(item.get("font_height").is_none());
         assert!(item.get("font_is_buggy").is_none());
         assert!(item.get("mcid").is_none());
@@ -371,8 +370,8 @@ mod tests {
     fn test_format_json_result_includes_image_metadata_and_errors() {
         let image = ExtractedImage {
             id: "p2_0".into(),
-            name: "image_p2_0.jpg".into(),
-            path: Some("/tmp/images/image_p2_0.jpg".into()),
+            name: "img_p2_1.jpg".into(),
+            path: Some("/tmp/images/img_p2_1.jpg".into()),
             page: 2,
             bbox: Rect {
                 x: 10.0,
@@ -385,7 +384,7 @@ mod tests {
             rotation: 90.0,
             format: "jpg".into(),
             duplicate_of: Some("p1_0".into()),
-            bytes: vec![1, 2, 3],
+            bytes: std::sync::Arc::new(vec![1, 2, 3]),
         };
         let result = crate::parser::ParseResult {
             pages: vec![],

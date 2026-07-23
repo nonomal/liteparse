@@ -49,7 +49,7 @@ pub enum Block {
     /// page's vector graphics (e.g. divider line between sections).
     HorizontalRule,
     /// Reference to a raster image on the page. Rendered as
-    /// `![](image_{id}.{format})`. Suppressed entirely when `ImageMode::Off`.
+    /// `![](img_{id}.{format})`. Suppressed entirely when `ImageMode::Off`.
     Figure {
         id: String,
         format: String,
@@ -240,7 +240,7 @@ pub fn render_blocks(blocks: &[Block]) -> String {
                 out.push_str("---");
             }
             Block::Figure { id, format } => {
-                out.push_str("![](image_");
+                out.push_str("![](img_");
                 out.push_str(id);
                 out.push('.');
                 out.push_str(format);
@@ -280,10 +280,10 @@ mod tests {
     fn render_figure_uses_extracted_format() {
         assert_eq!(
             render_blocks(&[Block::Figure {
-                id: "p1_0".into(),
+                id: "p1_1".into(),
                 format: "jpg".into(),
             }]),
-            "![](image_p1_0.jpg)"
+            "![](img_p1_1.jpg)"
         );
     }
 

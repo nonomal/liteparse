@@ -189,7 +189,7 @@ class ExtractedImage:
     Populated only when ``extract_images=True``. ``image_mode`` controls
     Markdown presentation independently.
     The ``id`` matches the reference used in the markdown output
-    (e.g. ``![](image_p1_0.png)`` → ``id="p1_0"``).
+    (e.g. ``![](img_p1_1.png)`` → ``id="p1_1"``).
     """
     id: str
     name: str

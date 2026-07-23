@@ -77,7 +77,7 @@ pub(crate) fn extract_pages_and_images(
     let page_count = document.page_count();
     let mut pages = Vec::new();
     let mut images: Vec<ExtractedImage> = Vec::new();
-    let mut image_cache: Vec<CachedImage> = Vec::new();
+    let mut image_cache = ImageCache::default();
     let mut image_error_count = 0u32;
     let form_environment = output_options
         .extract_form_fields
@@ -522,11 +522,53 @@ struct CachedImage {
     raw_bytes: Vec<u8>,
     id: String,
     format: String,
-    bytes: Vec<u8>,
+    bytes: std::sync::Arc<Vec<u8>>,
+}
+
+/// Dedup key: hash of the source stream plus the metadata that affects
+/// decoding. The full raw bytes are still compared on lookup (hash prefilter,
+/// not trust-the-hash), but only within the matching bucket.
+#[derive(PartialEq, Eq, Hash)]
+struct CacheKey {
+    raw_hash: u64,
     width: u32,
     height: u32,
     bits_per_pixel: u32,
     colorspace: i32,
+}
+
+#[derive(Default)]
+pub(crate) struct ImageCache {
+    entries: std::collections::HashMap<CacheKey, Vec<CachedImage>>,
+}
+
+impl ImageCache {
+    fn key(r: &ImageRef, raw_bytes: &[u8]) -> CacheKey {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        raw_bytes.hash(&mut hasher);
+        CacheKey {
+            raw_hash: hasher.finish(),
+            width: r.pixel_width,
+            height: r.pixel_height,
+            bits_per_pixel: r.bits_per_pixel,
+            colorspace: r.colorspace,
+        }
+    }
+
+    fn get(&self, r: &ImageRef, raw_bytes: &[u8]) -> Option<&CachedImage> {
+        self.entries
+            .get(&Self::key(r, raw_bytes))?
+            .iter()
+            .find(|entry| entry.raw_bytes == *raw_bytes)
+    }
+
+    fn insert(&mut self, r: &ImageRef, entry: CachedImage) {
+        self.entries
+            .entry(Self::key(r, &entry.raw_bytes))
+            .or_default()
+            .push(entry);
+    }
 }
 
 pub(crate) struct RenderedImages {
@@ -538,23 +580,17 @@ fn render_page_images(
     page: &Page,
     page_number: u32,
     refs: &[ImageRef],
-    cache: &mut Vec<CachedImage>,
+    cache: &mut ImageCache,
 ) -> RenderedImages {
     let mut out = Vec::with_capacity(refs.len());
     let mut error_count = 0;
     for r in refs {
         if let Some(raw_bytes) = r.raw_bytes.as_ref()
-            && let Some(cached) = cache.iter().find(|entry| {
-                entry.raw_bytes == *raw_bytes
-                    && entry.width == r.pixel_width
-                    && entry.height == r.pixel_height
-                    && entry.bits_per_pixel == r.bits_per_pixel
-                    && entry.colorspace == r.colorspace
-            })
+            && let Some(cached) = cache.get(r, raw_bytes)
         {
             out.push(ExtractedImage {
                 id: r.id.clone(),
-                name: format!("image_{}.{}", r.id, cached.format),
+                name: format!("img_{}.{}", r.id, cached.format),
                 path: None,
                 page: page_number,
                 bbox: r.bbox.clone(),
@@ -563,7 +599,7 @@ fn render_page_images(
                 rotation: r.rotation,
                 format: cached.format.clone(),
                 duplicate_of: Some(cached.id.clone()),
-                bytes: cached.bytes.clone(),
+                bytes: std::sync::Arc::clone(&cached.bytes),
             });
             continue;
         }
@@ -594,9 +630,10 @@ fn render_page_images(
                 continue;
             }
         };
+        let bytes = std::sync::Arc::new(bytes);
         out.push(ExtractedImage {
             id: r.id.clone(),
-            name: format!("image_{}.{}", r.id, format),
+            name: format!("img_{}.{}", r.id, format),
             path: None,
             page: page_number,
             bbox: r.bbox.clone(),
@@ -605,19 +642,18 @@ fn render_page_images(
             rotation: r.rotation,
             format: format.clone(),
             duplicate_of: None,
-            bytes: bytes.clone(),
+            bytes: std::sync::Arc::clone(&bytes),
         });
         if let Some(raw_bytes) = r.raw_bytes.clone() {
-            cache.push(CachedImage {
-                raw_bytes,
-                id: r.id.clone(),
-                format,
-                bytes,
-                width: r.pixel_width,
-                height: r.pixel_height,
-                bits_per_pixel: r.bits_per_pixel,
-                colorspace: r.colorspace,
-            });
+            cache.insert(
+                r,
+                CachedImage {
+                    raw_bytes,
+                    id: r.id.clone(),
+                    format,
+                    bytes,
+                },
+            );
         }
     }
     RenderedImages {
@@ -657,7 +693,9 @@ fn extract_page_image_refs(
         .into_iter()
         .enumerate()
         .map(|(i, image)| ImageRef {
-            id: format!("p{}_{}", page_number, i),
+            // 1-based image number to match the platform extractor's
+            // `img_p%d_%d` naming (C `imageNum` starts at 1).
+            id: format!("p{}_{}", page_number, i + 1),
             bbox: Rect {
                 x: image.bounds.x,
                 y: image.bounds.y,

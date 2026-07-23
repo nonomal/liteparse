@@ -50,6 +50,8 @@ export interface LiteParseConfig {
   extractContentBounds: boolean;
   /** Detect solid rectangles/lines in rendered page screenshots (default: false). */
   detectScreenshotRects: boolean;
+  /** Draw AcroForm field appearances into rendered rasters — screenshots and OCR inputs (runs document open/JS actions; default: false). */
+  renderFormFields: boolean;
   preserveVerySmallText: boolean;
   password?: string;
   quiet: boolean;
@@ -316,7 +318,7 @@ export interface FormField {
 }
 
 export interface ExtractedImage {
-  /** Reference id used in the markdown output (e.g. `![](image_p1_0.png)` → `"p1_0"`). */
+  /** Reference id used in the markdown output (e.g. `![](img_p1_1.png)` → `"p1_1"`). */
   id: string;
   /** File name used when `imageOutputDir` is configured. */
   name: string;
@@ -490,6 +492,7 @@ export class LiteParse {
       extractXfaPackets: userConfig.extractXfaPackets,
       extractContentBounds: userConfig.extractContentBounds,
       detectScreenshotRects: userConfig.detectScreenshotRects,
+      renderFormFields: userConfig.renderFormFields,
       preserveVerySmallText: userConfig.preserveVerySmallText,
       password: userConfig.password,
       quiet: userConfig.quiet,
@@ -528,6 +531,7 @@ export class LiteParse {
       extractXfaPackets: resolved.extractXfaPackets ?? false,
       extractContentBounds: resolved.extractContentBounds ?? false,
       detectScreenshotRects: resolved.detectScreenshotRects ?? false,
+      renderFormFields: resolved.renderFormFields ?? false,
       preserveVerySmallText: resolved.preserveVerySmallText ?? false,
       password: resolved.password ?? undefined,
       quiet: resolved.quiet ?? false,

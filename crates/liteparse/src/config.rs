@@ -35,7 +35,8 @@ pub struct LiteParseConfig {
     /// This does not enable embedded-image extraction.
     pub image_mode: ImageMode,
     /// Extract embedded image bytes and metadata into `ParseResult.images`.
-    /// Defaults to false and is the only switch that enables extraction.
+    /// Defaults to false. `ImageMode::Embed` also enables extraction for
+    /// backwards compatibility (see [`LiteParseConfig::effective_extract_images`]).
     pub extract_images: bool,
     /// Directory where extracted embedded images are written. Requires
     /// `extract_images` to be true.
@@ -72,6 +73,13 @@ pub struct LiteParseConfig {
     /// vector paths. Default `false` (adds a full-bitmap scan per page).
     #[serde(default)]
     pub detect_screenshot_rects: bool,
+    /// Draw AcroForm field appearances (filled values, checkbox states) into
+    /// rendered rasters — screenshots and OCR inputs. This initializes a
+    /// PDFium form-fill environment and runs the document's open/JS actions,
+    /// so it is off by default: plain parses should neither execute document
+    /// scripts nor change raster bytes for form-bearing PDFs.
+    #[serde(default)]
+    pub render_form_fields: bool,
     /// Whether a systemic OCR failure (every OCR task failed *and* at least one
     /// was a text-sparse page whose primary text source was OCR) aborts the
     /// whole parse. Default `true`: surface the root cause instead of silently
@@ -138,12 +146,13 @@ pub struct CropBox {
 /// Image handling for the markdown emitter.
 ///
 /// * `Off` — strip image references entirely.
-/// * `Placeholder` (default) — emit `![](image_pN_K.png)` references in
+/// * `Placeholder` (default) — emit `![](img_pN_K.png)` references in
 ///   reading order at each image's y position, but do **not** extract or
 ///   return pixel bytes. Keeps response size small while letting the LLM see
 ///   where figures live in the document.
-/// * `Embed` — emit the same references as `Placeholder`. Embedded pixel bytes
-///   are controlled independently by `LiteParseConfig::extract_images`.
+/// * `Embed` — emit the same references as `Placeholder`, and extract the
+///   embedded pixel bytes into `ParseResult.images` (equivalent to setting
+///   `LiteParseConfig::extract_images`, which `Embed` predates).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageMode {
@@ -159,6 +168,16 @@ pub enum OutputFormat {
     Json,
     Text,
     Markdown,
+}
+
+impl LiteParseConfig {
+    /// Whether embedded-image extraction should run. True when
+    /// `extract_images` is set, or when the legacy `ImageMode::Embed` is
+    /// configured — `Embed` implied byte extraction before the two switches
+    /// were decoupled, and existing callers rely on that.
+    pub fn effective_extract_images(&self) -> bool {
+        self.extract_images || self.image_mode == ImageMode::Embed
+    }
 }
 
 impl Default for LiteParseConfig {
@@ -197,6 +216,7 @@ impl Default for LiteParseConfig {
             extract_content_bounds: false,
             extract_xfa_packets: false,
             detect_screenshot_rects: false,
+            render_form_fields: false,
             ocr_failure_fatal: true,
             ocr_hedge_delays_ms: Vec::new(),
             emit_word_boxes: false,

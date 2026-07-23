@@ -419,12 +419,16 @@ pub(crate) fn render_pages_for_ocr(
     pages: &[Page],
     dpi: f32,
     grayscale: bool,
+    render_form_fields: bool,
 ) -> Result<Vec<RenderedPage>, LiteParseError> {
     let mut rendered = Vec::new();
-    // Draw form-field appearances into the OCR raster so filled-in form
-    // values are visible to the OCR engine (matches the LlamaParse extract
-    // binary's screenshot rendering).
-    let form = document.form_environment();
+    // With `render_form_fields`, draw form-field appearances into the OCR
+    // raster so filled-in form values are visible to the OCR engine (matches
+    // the LlamaParse extract binary's screenshot rendering). Opt-in because
+    // the form environment runs the document's open/JS actions.
+    let form = render_form_fields
+        .then(|| document.form_environment())
+        .flatten();
     if let Some(form) = form.as_ref() {
         form.run_document_actions();
     }

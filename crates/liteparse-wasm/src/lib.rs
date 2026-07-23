@@ -84,6 +84,13 @@ pub struct LiteParseConfig {
     include_complexity: Option<bool>,
     /// Expose page-scoped vector shapes and merged H/V line segments.
     extract_vector_graphics: Option<bool>,
+    /// Include rich PDF text metadata on text items (font metrics/weight,
+    /// buggy state, MCID, fill/stroke colors, raw char codes, generated
+    /// trailing-space state). Default false.
+    extract_text_metadata: Option<bool>,
+    /// Draw AcroForm field appearances into OCR rasters (runs document
+    /// open/JS actions). Default false.
+    render_form_fields: Option<bool>,
 }
 
 /// A page sub-region as the fraction cropped from each side (top-left origin,
@@ -201,6 +208,12 @@ impl LiteParseConfig {
         if let Some(v) = self.extract_vector_graphics {
             cfg.extract_vector_graphics = v;
         }
+        if let Some(v) = self.extract_text_metadata {
+            cfg.extract_text_metadata = v;
+        }
+        if let Some(v) = self.render_form_fields {
+            cfg.render_form_fields = v;
+        }
         cfg.num_workers = 1;
         Ok(cfg)
     }
@@ -251,6 +264,8 @@ impl LiteParseConfig {
             skip_diagonal_text: Some(cfg.skip_diagonal_text),
             include_complexity: Some(cfg.include_complexity),
             extract_vector_graphics: Some(cfg.extract_vector_graphics),
+            extract_text_metadata: Some(cfg.extract_text_metadata),
+            render_form_fields: Some(cfg.render_form_fields),
         }
     }
 }
@@ -287,6 +302,29 @@ pub struct TextItem {
     pub confidence: Option<f32>,
     /// Rotation in degrees (viewport space).
     pub rotation: f32,
+    // Rich text metadata — present only when `extractTextMetadata` is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_height: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_ascent: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_descent: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_weight: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_width: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_is_buggy: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcid: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stroke_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub char_codes: Option<Vec<u32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trailing_space_generated: Option<bool>,
     /// Per-word sub-boxes for attribution. Omitted when empty (the default —
     /// only populated when parsing with `emitWordBoxes: true`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -315,6 +353,8 @@ pub struct ParsedPage {
     pub annotations: Option<Vec<DocumentAnnotation>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub form_fields: Option<Vec<FormField>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub structure_tree: Option<StructureTree>,
 }
 
 #[derive(Serialize, Tsify)]
@@ -462,6 +502,96 @@ impl FormField {
             }),
             options: field.options.clone(),
             selected_options: field.selected_options.clone(),
+        }
+    }
+}
+
+/// Scalar value from a tagged-PDF structure element's `/A` dictionary.
+#[derive(Serialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(untagged)]
+pub enum StructureAttributeValue {
+    Boolean(bool),
+    Number(f32),
+    String(String),
+}
+
+#[derive(Serialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
+pub struct StructureTree {
+    pub roots: Vec<StructureTreeElement>,
+}
+
+#[derive(Serialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
+pub struct StructureTreeElement {
+    #[serde(rename = "type")]
+    pub element_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alt_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub attributes: std::collections::BTreeMap<String, StructureAttributeValue>,
+    pub marked_content_ids: Vec<i32>,
+    pub children: Vec<StructureTreeElement>,
+    pub annotations: Vec<DocumentAnnotation>,
+}
+
+impl StructureTree {
+    fn from_rust(tree: &liteparse::types::StructureTree) -> Self {
+        Self {
+            roots: tree
+                .roots
+                .iter()
+                .map(StructureTreeElement::from_rust)
+                .collect(),
+        }
+    }
+}
+
+impl StructureTreeElement {
+    fn from_rust(element: &liteparse::types::StructureTreeElement) -> Self {
+        Self {
+            element_type: element.element_type.clone(),
+            id: element.id.clone(),
+            actual_text: element.actual_text.clone(),
+            alt_text: element.alt_text.clone(),
+            title: element.title.clone(),
+            attributes: element
+                .attributes
+                .iter()
+                .map(|(name, value)| {
+                    let value = match value {
+                        liteparse::types::StructureAttributeValue::Boolean(v) => {
+                            StructureAttributeValue::Boolean(*v)
+                        }
+                        liteparse::types::StructureAttributeValue::Number(v) => {
+                            StructureAttributeValue::Number(*v)
+                        }
+                        liteparse::types::StructureAttributeValue::String(v) => {
+                            StructureAttributeValue::String(v.clone())
+                        }
+                    };
+                    (name.clone(), value)
+                })
+                .collect(),
+            marked_content_ids: element.marked_content_ids.clone(),
+            children: element
+                .children
+                .iter()
+                .map(StructureTreeElement::from_rust)
+                .collect(),
+            annotations: element
+                .annotations
+                .iter()
+                .map(DocumentAnnotation::from_rust)
+                .collect(),
         }
     }
 }
@@ -704,6 +834,7 @@ impl LiteParse {
             .await
             .map_err(|e| JsError::new(&format!("parse failed: {}", e)))?;
 
+        let extract_text_metadata = self.inner.config().extract_text_metadata;
         let pages: Vec<ParsedPage> = result
             .pages
             .iter()
@@ -722,32 +853,51 @@ impl LiteParse {
                 text_items: p
                     .text_items
                     .iter()
-                    .map(|i| TextItem {
-                        text: i.text.clone(),
-                        x: i.x,
-                        y: i.y,
-                        width: i.width,
-                        height: i.height,
-                        font_name: i.font_name.clone(),
-                        font_size: i.font_size,
-                        confidence: i.confidence,
-                        rotation: i.rotation,
-                        words: if i.words.is_empty() {
-                            None
-                        } else {
-                            Some(
-                                i.words
-                                    .iter()
-                                    .map(|w| WordBox {
-                                        text: w.text.clone(),
-                                        x: w.x,
-                                        y: w.y,
-                                        width: w.width,
-                                        height: w.height,
-                                    })
-                                    .collect(),
-                            )
-                        },
+                    .map(|i| {
+                        // Core-gated metadata view — the single source of
+                        // truth for which fields `extractTextMetadata` covers.
+                        let meta = i.text_metadata(extract_text_metadata);
+                        TextItem {
+                            text: i.text.clone(),
+                            x: i.x,
+                            y: i.y,
+                            width: i.width,
+                            height: i.height,
+                            font_name: i.font_name.clone(),
+                            font_size: i.font_size,
+                            confidence: i.confidence,
+                            rotation: i.rotation,
+                            font_height: meta.font_height,
+                            font_ascent: meta.font_ascent,
+                            font_descent: meta.font_descent,
+                            font_weight: meta.font_weight,
+                            text_width: meta.text_width,
+                            font_is_buggy: meta.font_is_buggy,
+                            mcid: meta.mcid,
+                            fill_color: meta.fill_color.map(str::to_owned),
+                            stroke_color: meta.stroke_color.map(str::to_owned),
+                            char_codes: meta
+                                .char_codes
+                                .filter(|codes| !codes.is_empty())
+                                .map(<[u32]>::to_vec),
+                            trailing_space_generated: meta.trailing_space_generated,
+                            words: if i.words.is_empty() {
+                                None
+                            } else {
+                                Some(
+                                    i.words
+                                        .iter()
+                                        .map(|w| WordBox {
+                                            text: w.text.clone(),
+                                            x: w.x,
+                                            y: w.y,
+                                            width: w.width,
+                                            height: w.height,
+                                        })
+                                        .collect(),
+                                )
+                            },
+                        }
                     })
                     .collect(),
                 complexity: p.complexity.as_ref().map(PageComplexityStats::from_rust),
@@ -795,6 +945,7 @@ impl LiteParse {
                     .form_fields
                     .as_ref()
                     .map(|fields| fields.iter().map(FormField::from_rust).collect()),
+                structure_tree: p.structure_tree.as_ref().map(StructureTree::from_rust),
             })
             .collect();
 
@@ -817,7 +968,7 @@ impl LiteParse {
                 rotation: img.rotation,
                 format: img.format.clone(),
                 duplicate_of: img.duplicate_of.clone(),
-                bytes: img.bytes.clone(),
+                bytes: img.bytes.as_slice().to_vec(),
             })
             .collect();
 
@@ -1010,6 +1161,17 @@ pub fn search_items(items: Vec<SearchTextItem>, options: SearchOptions) -> Vec<T
             font_size: i.font_size,
             confidence: i.confidence,
             rotation: i.rotation,
+            font_height: None,
+            font_ascent: None,
+            font_descent: None,
+            font_weight: None,
+            text_width: None,
+            font_is_buggy: None,
+            mcid: None,
+            fill_color: None,
+            stroke_color: None,
+            char_codes: None,
+            trailing_space_generated: None,
             words: if i.words.is_empty() {
                 None
             } else {

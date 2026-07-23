@@ -77,23 +77,72 @@ fn write_extracted_images(
     use std::path::Path;
 
     std::fs::create_dir_all(output_dir)?;
-    let mut written: HashMap<String, (String, String)> = HashMap::new();
+    // Platform contract (mirrors the LlamaParse C extractor, which the worker
+    // pipeline is built around): only the canonical file is written; every
+    // duplicate placement keeps its own `name` but points `path` at the
+    // canonical file. Markdown figure references are rewritten to the
+    // canonical name (`rewrite_duplicate_image_refs`) so they only ever
+    // reference files that exist.
+    let mut written: HashMap<String, String> = HashMap::new();
     for image in images {
         if let Some(canonical) = image.duplicate_of.as_ref()
-            && let Some((name, path)) = written.get(canonical)
+            && let Some(path) = written.get(canonical)
         {
-            image.name = name.clone();
             image.path = Some(path.clone());
             continue;
         }
 
         let path = Path::new(output_dir).join(&image.name);
-        std::fs::write(&path, &image.bytes)?;
+        std::fs::write(&path, image.bytes.as_slice())?;
         let path = path.to_string_lossy().into_owned();
         image.path = Some(path.clone());
-        written.insert(image.id.clone(), (image.name.clone(), path));
+        written.insert(image.id.clone(), path);
     }
     Ok(())
+}
+
+/// Rewrite markdown figure references for deduplicated images to the
+/// canonical entry's file name. The markdown emitter references each figure
+/// by its own placement id (`![](img_p2_1.jpg)`), but only the canonical
+/// file is written to disk (see `write_extracted_images`), so duplicate
+/// placements must reference the canonical name — the same resolution the
+/// LlamaParse worker applies via `resolveOutputImageName`.
+fn rewrite_duplicate_image_refs(
+    pages: &mut [ParsedPage],
+    full_text: &mut String,
+    images: &[ExtractedImage],
+) {
+    use std::collections::HashMap;
+
+    let by_id: HashMap<&str, &ExtractedImage> = images
+        .iter()
+        .map(|image| (image.id.as_str(), image))
+        .collect();
+    let renames: Vec<(String, String)> = images
+        .iter()
+        .filter_map(|image| {
+            let canonical = by_id.get(image.duplicate_of.as_ref()?.as_str())?;
+            Some((
+                format!("![](img_{}.{})", image.id, image.format),
+                format!("![]({})", canonical.name),
+            ))
+        })
+        .collect();
+    if renames.is_empty() {
+        return;
+    }
+
+    for markdown in pages
+        .iter_mut()
+        .map(|page| &mut page.markdown)
+        .chain(std::iter::once(full_text))
+    {
+        for (from, to) in &renames {
+            if markdown.contains(from.as_str()) {
+                *markdown = markdown.replace(from.as_str(), to);
+            }
+        }
+    }
 }
 
 /// Build the default glyph resolver from the environment, if configured.
@@ -179,9 +228,10 @@ impl LiteParse {
     }
 
     fn validate_output_config(&self) -> Result<(), LiteParseError> {
-        if self.config.image_output_dir.is_some() && !self.config.extract_images {
+        if self.config.image_output_dir.is_some() && !self.config.effective_extract_images() {
             return Err(LiteParseError::Config(
-                "image_output_dir requires extract_images = true".to_string(),
+                "image_output_dir requires extract_images = true (or image_mode = embed)"
+                    .to_string(),
             ));
         }
         Ok(())
@@ -432,7 +482,7 @@ impl LiteParse {
                 self.glyph_resolver.as_deref(),
                 extract::ExtractionOutputOptions {
                     extract_content_bounds: self.config.extract_content_bounds,
-                    extract_images: self.config.extract_images,
+                    extract_images: self.config.effective_extract_images(),
                     emit_word_boxes: self.config.emit_word_boxes,
                     extract_text_metadata: self.config.extract_text_metadata,
                     extract_vector_graphics: self.config.extract_vector_graphics,
@@ -453,6 +503,7 @@ impl LiteParse {
                     &pages,
                     self.config.dpi,
                     ocr_grayscale,
+                    self.config.render_form_fields,
                 )?;
                 log(&format!(
                     "[liteparse] ocr render: {:.1}ms ({} pages)",
@@ -538,7 +589,7 @@ impl LiteParse {
             t2.duration_since(t_ocr).as_secs_f64() * 1000.0
         ));
 
-        let full_text = if self.config.output_format == crate::config::OutputFormat::Markdown {
+        let mut full_text = if self.config.output_format == crate::config::OutputFormat::Markdown {
             let page_md =
                 markdown::format_markdown_pages(&parsed_pages, &outline, self.config.image_mode);
             let md = page_md.join("\n\n-----\n\n");
@@ -558,12 +609,15 @@ impl LiteParse {
                 .collect::<Vec<_>>()
                 .join("\n\n")
         };
+        if self.config.output_format == crate::config::OutputFormat::Markdown {
+            rewrite_duplicate_image_refs(&mut parsed_pages, &mut full_text, &images);
+        }
 
         let total = web_time::Instant::now().duration_since(t0).as_secs_f64() * 1000.0;
         log(&format!("[liteparse] total: {:.1}ms", total));
 
         #[cfg(not(target_arch = "wasm32"))]
-        if self.config.extract_images
+        if self.config.effective_extract_images()
             && let Some(output_dir) = self.config.image_output_dir.as_deref()
         {
             write_extracted_images(output_dir, &mut images)?;
@@ -665,6 +719,7 @@ impl LiteParse {
             self.config.dpi,
             self.config.password.as_deref(),
             self.config.detect_screenshot_rects,
+            self.config.render_form_fields,
         )?;
 
         Ok(rendered
@@ -757,18 +812,23 @@ mod tests {
     }
 
     #[test]
-    fn image_extraction_is_explicitly_opt_in() {
-        let options = extract::ExtractionOutputOptions {
-            extract_images: true,
-            ..Default::default()
-        };
-        assert!(options.extract_images);
+    fn image_extraction_is_opt_in_but_embed_mode_implies_it() {
+        let default = LiteParseConfig::default();
+        assert!(!default.effective_extract_images());
 
+        // `image_mode = embed` predates `extract_images` and must keep
+        // extracting bytes for existing callers.
         let embed = LiteParseConfig {
             image_mode: crate::config::ImageMode::Embed,
             ..Default::default()
         };
-        assert!(!embed.extract_images);
+        assert!(embed.effective_extract_images());
+
+        let explicit = LiteParseConfig {
+            extract_images: true,
+            ..Default::default()
+        };
+        assert!(explicit.effective_extract_images());
     }
 
     #[test]
@@ -779,16 +839,23 @@ mod tests {
         });
         assert_eq!(
             parser.validate_output_config().unwrap_err().to_string(),
-            "invalid config: image_output_dir requires extract_images = true"
+            "invalid config: image_output_dir requires extract_images = true (or image_mode = embed)"
         );
+
+        let embed = LiteParse::new(LiteParseConfig {
+            image_mode: crate::config::ImageMode::Embed,
+            image_output_dir: Some("images".into()),
+            ..Default::default()
+        });
+        assert!(embed.validate_output_config().is_ok());
     }
 
     #[test]
-    fn image_output_reuses_canonical_file_for_duplicates() {
+    fn image_output_writes_duplicates_from_canonical_bytes() {
         fn image(id: &str, duplicate_of: Option<&str>, bytes: &[u8]) -> ExtractedImage {
             ExtractedImage {
                 id: id.into(),
-                name: format!("image_{id}.png"),
+                name: format!("img_{id}.png"),
                 path: None,
                 page: 1,
                 bbox: crate::types::Rect::default(),
@@ -797,23 +864,78 @@ mod tests {
                 rotation: 0.0,
                 format: "png".into(),
                 duplicate_of: duplicate_of.map(str::to_owned),
-                bytes: bytes.to_vec(),
+                bytes: std::sync::Arc::new(bytes.to_vec()),
             }
         }
 
         let dir = tempfile::tempdir().unwrap();
         let mut images = vec![
-            image("p1_0", None, b"canonical"),
-            image("p2_0", Some("p1_0"), b"canonical"),
+            image("p1_1", None, b"canonical"),
+            image("p2_1", Some("p1_1"), b"canonical"),
         ];
         write_extracted_images(dir.path().to_str().unwrap(), &mut images).unwrap();
 
-        assert_eq!(images[0].name, images[1].name);
+        // Platform contract: one file on disk; the duplicate keeps its own
+        // placement `name` but shares the canonical file's `path`.
+        assert_eq!(images[0].name, "img_p1_1.png");
+        assert_eq!(images[1].name, "img_p2_1.png");
         assert_eq!(images[0].path, images[1].path);
         assert_eq!(
             std::fs::read(images[0].path.as_ref().unwrap()).unwrap(),
             b"canonical"
         );
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn duplicate_image_markdown_refs_are_rewritten_to_canonical() {
+        fn image(id: &str, format: &str, duplicate_of: Option<&str>) -> ExtractedImage {
+            ExtractedImage {
+                id: id.into(),
+                name: format!("img_{id}.{format}"),
+                path: None,
+                page: 1,
+                bbox: crate::types::Rect::default(),
+                width: 2,
+                height: 2,
+                rotation: 0.0,
+                format: format.into(),
+                duplicate_of: duplicate_of.map(str::to_owned),
+                bytes: std::sync::Arc::new(Vec::new()),
+            }
+        }
+
+        let mut pages = vec![ParsedPage {
+            page_number: 1,
+            page_width: 612.0,
+            page_height: 792.0,
+            content_bounds: None,
+            text: String::new(),
+            markdown: "intro\n\n![](img_p2_1.jpg)\n\noutro".into(),
+            text_items: vec![],
+            projected_lines: vec![],
+            regions: crate::types::Region::default(),
+            graphics: vec![],
+            vector_graphics: None,
+            figures: vec![],
+            struct_nodes: vec![],
+            image_refs: vec![],
+            complexity: None,
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
+        }];
+        let mut full_text = pages[0].markdown.clone();
+        let images = vec![
+            image("p1_1", "jpg", None),
+            image("p2_1", "jpg", Some("p1_1")),
+        ];
+
+        rewrite_duplicate_image_refs(&mut pages, &mut full_text, &images);
+
+        // The duplicate's ref now points at the canonical file; canonical
+        // refs and surrounding text are untouched.
+        assert_eq!(pages[0].markdown, "intro\n\n![](img_p1_1.jpg)\n\noutro");
+        assert_eq!(full_text, pages[0].markdown);
     }
 }

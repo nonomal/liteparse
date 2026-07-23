@@ -206,7 +206,7 @@ Image handling is controlled by `--image-mode`:
 
 | Mode | Behavior |
 |------|----------|
-| `placeholder` (default) | Emits `![](image_pN_K.png)` references in reading order |
+| `placeholder` (default) | Emits `![](img_pN_K.png)` references in reading order |
 | `off` | Strips images entirely |
 | `embed` | Emits the same image references as `placeholder` |
 

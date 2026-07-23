@@ -371,6 +371,7 @@ class LiteParse:
         extract_xfa_packets: Optional[bool] = None,
         extract_content_bounds: Optional[bool] = None,
         detect_screenshot_rects: Optional[bool] = None,
+        render_form_fields: Optional[bool] = None,
         ocr_failure_fatal: Optional[bool] = None,
         ocr_hedge_delays_ms: Optional[List[int]] = None,
         emit_word_boxes: Optional[bool] = None,
@@ -494,6 +495,8 @@ class LiteParse:
             kwargs["extract_content_bounds"] = extract_content_bounds
         if detect_screenshot_rects is not None:
             kwargs["detect_screenshot_rects"] = detect_screenshot_rects
+        if render_form_fields is not None:
+            kwargs["render_form_fields"] = render_form_fields
         if ocr_failure_fatal is not None:
             kwargs["ocr_failure_fatal"] = ocr_failure_fatal
         if ocr_hedge_delays_ms is not None:

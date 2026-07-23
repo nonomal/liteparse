@@ -45,7 +45,7 @@ pub struct JsLiteParseConfig {
     /// Number of concurrent OCR workers (default: CPU cores - 1).
     pub num_workers: Option<u32>,
     /// How to surface raster images in markdown output: "off", "placeholder"
-    /// (default — emits `![](image_pN_K.png)` references with no bytes), or
+    /// (default — emits `![](img_pN_K.png)` references with no bytes), or
     /// "embed" (same presentation as placeholder; extraction is independent).
     pub image_mode: Option<String>,
     /// Extract embedded image bytes and metadata (default false).
@@ -71,6 +71,9 @@ pub struct JsLiteParseConfig {
     /// Detect solid rectangles/lines in rendered page screenshots and attach
     /// them to each screenshot result. Default false.
     pub detect_screenshot_rects: Option<bool>,
+    /// Draw AcroForm field appearances into rendered rasters (screenshots and
+    /// OCR inputs). Runs the document's open/JS actions. Default false.
+    pub render_form_fields: Option<bool>,
     /// Whether a systemic OCR failure aborts the whole parse (default true).
     /// Set false to keep already-recovered native text and return partial
     /// results when OCR is unavailable, instead of rejecting.
@@ -191,6 +194,9 @@ impl JsLiteParseConfig {
         if let Some(v) = self.detect_screenshot_rects {
             cfg.detect_screenshot_rects = v;
         }
+        if let Some(v) = self.render_form_fields {
+            cfg.render_form_fields = v;
+        }
         if let Some(v) = self.ocr_failure_fatal {
             cfg.ocr_failure_fatal = v;
         }
@@ -260,6 +266,7 @@ impl JsLiteParseConfig {
             extract_xfa_packets: Some(cfg.extract_xfa_packets),
             extract_content_bounds: Some(cfg.extract_content_bounds),
             detect_screenshot_rects: Some(cfg.detect_screenshot_rects),
+            render_form_fields: Some(cfg.render_form_fields),
             ocr_failure_fatal: Some(cfg.ocr_failure_fatal),
             ocr_hedge_delays_ms: Some(
                 cfg.ocr_hedge_delays_ms
@@ -395,22 +402,25 @@ impl JsTextItem {
         }
     }
 
+    /// `from_rust` with the rich-metadata fields taken from the core-gated
+    /// [`liteparse::types::TextMetadata`] view, so the "what counts as text
+    /// metadata" list lives in one place instead of per binding.
     fn from_rust_for_output(item: &TextItem, extract_text_metadata: bool) -> Self {
-        let mut output = Self::from_rust(item);
-        if !extract_text_metadata {
-            output.font_height = None;
-            output.font_ascent = None;
-            output.font_descent = None;
-            output.font_weight = None;
-            output.text_width = None;
-            output.font_is_buggy = None;
-            output.mcid = None;
-            output.fill_color = None;
-            output.stroke_color = None;
-            output.char_codes = None;
-            output.trailing_space_generated = None;
+        let meta = item.text_metadata(extract_text_metadata);
+        Self {
+            font_height: meta.font_height.map(|v| v as f64),
+            font_ascent: meta.font_ascent.map(|v| v as f64),
+            font_descent: meta.font_descent.map(|v| v as f64),
+            font_weight: meta.font_weight,
+            text_width: meta.text_width.map(|v| v as f64),
+            font_is_buggy: meta.font_is_buggy,
+            mcid: meta.mcid,
+            fill_color: meta.fill_color.map(str::to_owned),
+            stroke_color: meta.stroke_color.map(str::to_owned),
+            char_codes: meta.char_codes.map(<[u32]>::to_vec),
+            trailing_space_generated: meta.trailing_space_generated,
+            ..Self::from_rust(item)
         }
-        output
     }
 }
 
@@ -1076,7 +1086,7 @@ impl JsParseResult {
                     rotation: img.rotation as f64,
                     format: img.format.clone(),
                     duplicate_of: img.duplicate_of.clone(),
-                    bytes: img.bytes.clone().into(),
+                    bytes: img.bytes.as_slice().to_vec().into(),
                 })
                 .collect(),
         }

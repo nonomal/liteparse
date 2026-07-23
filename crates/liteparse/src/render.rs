@@ -21,9 +21,10 @@ pub struct RenderedPage {
 
 /// Render selected pages from a PDF input to PNG bytes.
 ///
-/// Form-field appearances (filled values, checkbox states) are drawn on top
-/// of the page raster when the document has a form. With `detect_rects`,
-/// each page's raster is also scanned for solid rectangles and lines.
+/// With `render_form_fields`, form-field appearances (filled values, checkbox
+/// states) are drawn on top of the page raster; this runs the document's
+/// open/JS actions, so it is opt-in. With `detect_rects`, each page's raster
+/// is also scanned for solid rectangles and lines.
 ///
 /// Acquires the process-global PDFium lock for the entire render. The lock
 /// is held until this function returns — PNG encoding happens inside the
@@ -35,10 +36,17 @@ pub fn render_pages_to_png(
     dpi: f32,
     password: Option<&str>,
     detect_rects: bool,
+    render_form_fields: bool,
 ) -> Result<Vec<RenderedPage>, LiteParseError> {
     let lib = Library::init();
     let document = load_document_from_input(&lib, input, password)?;
-    render_document_pages(&document, page_numbers, dpi, detect_rects)
+    render_document_pages(
+        &document,
+        page_numbers,
+        dpi,
+        detect_rects,
+        render_form_fields,
+    )
 }
 
 fn render_document_pages(
@@ -46,6 +54,7 @@ fn render_document_pages(
     page_numbers: Option<&[u32]>,
     dpi: f32,
     detect_rects: bool,
+    render_form_fields: bool,
 ) -> Result<Vec<RenderedPage>, LiteParseError> {
     let page_count = document.page_count() as u32;
     let pages: Vec<u32> = match page_numbers {
@@ -53,7 +62,9 @@ fn render_document_pages(
         None => (1..=page_count).collect(),
     };
 
-    let form = document.form_environment();
+    let form = render_form_fields
+        .then(|| document.form_environment())
+        .flatten();
     if let Some(form) = form.as_ref() {
         form.run_document_actions();
     }
@@ -236,7 +247,7 @@ pub fn screenshot(
     password: Option<&str>,
 ) -> Result<(), LiteParseError> {
     let input = PdfInput::Path(pdf_path.to_string());
-    let pages = render_pages_to_png(&input, Some(&[page_num]), dpi, password, false)?;
+    let pages = render_pages_to_png(&input, Some(&[page_num]), dpi, password, false, false)?;
     let page = pages
         .into_iter()
         .next()

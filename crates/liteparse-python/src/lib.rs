@@ -378,24 +378,30 @@ impl PyTextItem {
         }
     }
 
-    fn from_rust_for_output(
-        mut item: liteparse::types::TextItem,
-        extract_text_metadata: bool,
-    ) -> Self {
-        if !extract_text_metadata {
-            item.font_height = None;
-            item.font_ascent = None;
-            item.font_descent = None;
-            item.font_weight = None;
-            item.text_width = None;
-            item.font_is_buggy = false;
-            item.mcid = None;
-            item.fill_color = None;
-            item.stroke_color = None;
-            item.char_codes.clear();
-            item.trailing_space_generated = false;
+    /// `from_rust` with the rich-metadata fields taken from the core-gated
+    /// [`liteparse::types::TextMetadata`] view, so the "what counts as text
+    /// metadata" list lives in one place instead of per binding.
+    fn from_rust_for_output(item: liteparse::types::TextItem, extract_text_metadata: bool) -> Self {
+        let meta = item.text_metadata(extract_text_metadata);
+        let (fill_color, stroke_color, char_codes) = (
+            meta.fill_color.map(str::to_owned),
+            meta.stroke_color.map(str::to_owned),
+            meta.char_codes.map(<[u32]>::to_vec),
+        );
+        Self {
+            font_height: meta.font_height.map(|v| v as f64),
+            font_ascent: meta.font_ascent.map(|v| v as f64),
+            font_descent: meta.font_descent.map(|v| v as f64),
+            font_weight: meta.font_weight,
+            text_width: meta.text_width.map(|v| v as f64),
+            font_is_buggy: meta.font_is_buggy.unwrap_or(false),
+            mcid: meta.mcid,
+            fill_color,
+            stroke_color,
+            char_codes: char_codes.unwrap_or_default(),
+            trailing_space_generated: meta.trailing_space_generated.unwrap_or(false),
+            ..Self::from_rust(item)
         }
-        Self::from_rust(item)
     }
 }
 
@@ -708,7 +714,7 @@ struct PyExtractedImage {
     format: String,
     #[pyo3(get)]
     duplicate_of: Option<String>,
-    bytes_buffer: Vec<u8>,
+    bytes_buffer: std::sync::Arc<Vec<u8>>,
 }
 
 #[pyclass(frozen, from_py_object)]
@@ -728,7 +734,7 @@ struct PyImageRect {
 impl PyExtractedImage {
     #[getter]
     fn bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, &self.bytes_buffer)
+        PyBytes::new(py, self.bytes_buffer.as_slice())
     }
 
     fn __repr__(&self) -> String {
@@ -996,6 +1002,8 @@ struct PyLiteParseConfig {
     #[pyo3(get)]
     detect_screenshot_rects: bool,
     #[pyo3(get)]
+    render_form_fields: bool,
+    #[pyo3(get)]
     ocr_failure_fatal: bool,
     #[pyo3(get)]
     ocr_hedge_delays_ms: Vec<u64>,
@@ -1063,6 +1071,7 @@ impl PyLiteParseConfig {
             extract_xfa_packets: cfg.extract_xfa_packets,
             extract_content_bounds: cfg.extract_content_bounds,
             detect_screenshot_rects: cfg.detect_screenshot_rects,
+            render_form_fields: cfg.render_form_fields,
             ocr_failure_fatal: cfg.ocr_failure_fatal,
             ocr_hedge_delays_ms: cfg.ocr_hedge_delays_ms.clone(),
             emit_word_boxes: cfg.emit_word_boxes,
@@ -1119,6 +1128,7 @@ impl LiteParse {
         extract_xfa_packets = None,
         extract_content_bounds = None,
         detect_screenshot_rects = None,
+        render_form_fields = None,
         ocr_failure_fatal = None,
         ocr_hedge_delays_ms = None,
         emit_word_boxes = None,
@@ -1152,6 +1162,7 @@ impl LiteParse {
         extract_xfa_packets: Option<bool>,
         extract_content_bounds: Option<bool>,
         detect_screenshot_rects: Option<bool>,
+        render_form_fields: Option<bool>,
         ocr_failure_fatal: Option<bool>,
         ocr_hedge_delays_ms: Option<Vec<u64>>,
         emit_word_boxes: Option<bool>,
@@ -1238,6 +1249,9 @@ impl LiteParse {
         }
         if let Some(v) = detect_screenshot_rects {
             cfg.detect_screenshot_rects = v;
+        }
+        if let Some(v) = render_form_fields {
+            cfg.render_form_fields = v;
         }
         if let Some(v) = ocr_failure_fatal {
             cfg.ocr_failure_fatal = v;

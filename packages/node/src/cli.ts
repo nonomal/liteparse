@@ -158,7 +158,9 @@ program
       const output =
         config.outputFormat === "json"
           ? JSON.stringify(
-              parseResultToCliJson(result),
+              parseResultToCliJson(result, {
+                extractTextMetadata: config.extractTextMetadata,
+              }),
               null,
               2,
             )
@@ -425,7 +427,9 @@ program
             const output =
               format === "json"
                 ? JSON.stringify(
-                    parseResultToCliJson(result),
+                    parseResultToCliJson(result, {
+                      extractTextMetadata: config.extractTextMetadata,
+                    }),
                     null,
                     2,
                   )

@@ -87,6 +87,66 @@ pub struct TextItem {
     pub words: Vec<WordBox>,
 }
 
+/// The `TextItem` fields governed by `extract_text_metadata`, pre-gated by
+/// [`TextItem::text_metadata`]. This is the single source of truth for which
+/// fields count as rich text metadata: every output surface (CLI JSON, napi,
+/// python, wasm) builds its public items from this struct, so a new metadata
+/// field added here is a compile error in each surface until it is wired
+/// through — instead of a silent schema drift between bindings.
+///
+/// All fields are `Option`/slice so "extraction disabled" is representable
+/// even for the plain-`bool` fields on `TextItem`: `None`/empty means the
+/// caller did not opt in and the field must be omitted from output.
+pub struct TextMetadata<'a> {
+    pub font_height: Option<f32>,
+    pub font_ascent: Option<f32>,
+    pub font_descent: Option<f32>,
+    pub font_weight: Option<i32>,
+    pub text_width: Option<f32>,
+    pub font_is_buggy: Option<bool>,
+    pub mcid: Option<i32>,
+    pub fill_color: Option<&'a str>,
+    pub stroke_color: Option<&'a str>,
+    pub char_codes: Option<&'a [u32]>,
+    pub trailing_space_generated: Option<bool>,
+}
+
+impl TextItem {
+    /// The rich-metadata view of this item: real values when `enabled`, all
+    /// absent otherwise. See [`TextMetadata`].
+    pub fn text_metadata(&self, enabled: bool) -> TextMetadata<'_> {
+        if enabled {
+            TextMetadata {
+                font_height: self.font_height,
+                font_ascent: self.font_ascent,
+                font_descent: self.font_descent,
+                font_weight: self.font_weight,
+                text_width: self.text_width,
+                font_is_buggy: Some(self.font_is_buggy),
+                mcid: self.mcid,
+                fill_color: self.fill_color.as_deref(),
+                stroke_color: self.stroke_color.as_deref(),
+                char_codes: Some(&self.char_codes),
+                trailing_space_generated: Some(self.trailing_space_generated),
+            }
+        } else {
+            TextMetadata {
+                font_height: None,
+                font_ascent: None,
+                font_descent: None,
+                font_weight: None,
+                text_width: None,
+                font_is_buggy: None,
+                mcid: None,
+                fill_color: None,
+                stroke_color: None,
+                char_codes: None,
+                trailing_space_generated: None,
+            }
+        }
+    }
+}
+
 /// One word's bounding box within a `TextItem`, in the same viewport space
 /// (top-left origin, 72 DPI) as the parent item. `text` is the word's content
 /// with inter-word spaces excluded.
@@ -358,7 +418,7 @@ pub struct ParsedPage {
 }
 
 /// One embedded raster image on a page. `id` is a stable, page-scoped slug
-/// used as the markdown link target (e.g. `image_p1_0.png`). `obj_index` is
+/// used as the markdown link target (e.g. `img_p1_1.png`). `obj_index` is
 /// the image's position among image page-objects, so a later embed pass can
 /// re-open the document and pull pixel bytes with `render_image_object`.
 #[doc(hidden)]
@@ -397,8 +457,10 @@ pub struct ExtractedImage {
     pub format: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duplicate_of: Option<String>,
+    /// Encoded image bytes. Shared (`Arc`) so duplicate entries reference the
+    /// canonical image's buffer instead of copying it per occurrence.
     #[serde(skip)]
-    pub bytes: Vec<u8>,
+    pub bytes: std::sync::Arc<Vec<u8>>,
 }
 
 #[doc(hidden)]

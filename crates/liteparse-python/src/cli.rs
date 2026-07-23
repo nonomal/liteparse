@@ -181,6 +181,12 @@ struct BatchParseCommand {
     /// Include page-scoped vector shapes and merged horizontal/vertical lines.
     #[arg(long)]
     extract_vector_graphics: bool,
+    /// Include all PDF annotations as page-scoped structured data.
+    #[arg(long)]
+    extract_annotations: bool,
+    /// Include AcroForm widget fields and values.
+    #[arg(long)]
+    extract_form_fields: bool,
     /// Include the tagged-PDF logical structure tree.
     #[arg(long)]
     extract_structure_tree: bool,
@@ -367,6 +373,8 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 extract_text_metadata: cmd.extract_text_metadata,
                 extract_images: cmd.extract_images,
                 extract_vector_graphics: cmd.extract_vector_graphics,
+                extract_annotations: cmd.extract_annotations,
+                extract_form_fields: cmd.extract_form_fields,
                 extract_structure_tree: cmd.extract_structure_tree,
                 extract_xfa_packets: cmd.extract_xfa_packets,
                 extract_content_bounds: cmd.extract_content_bounds,

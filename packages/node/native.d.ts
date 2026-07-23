@@ -35,7 +35,7 @@ export interface JsLiteParseConfig {
   numWorkers?: number
   /**
    * How to surface raster images in markdown output: "off", "placeholder"
-   * (default — emits `![](image_pN_K.png)` references with no bytes), or
+   * (default — emits `![](img_pN_K.png)` references with no bytes), or
    * "embed" (same presentation as placeholder; extraction is independent).
    */
   imageMode?: string
@@ -72,6 +72,8 @@ export interface JsLiteParseConfig {
    * them to each screenshot result. Default false.
    */
   detectScreenshotRects?: boolean
+  /** Draw AcroForm field appearances into rendered rasters (runs document open/JS actions). Default false. */
+  renderFormFields?: boolean
   /**
    * Whether a systemic OCR failure aborts the whole parse (default true).
    * Set false to keep already-recovered native text and return partial

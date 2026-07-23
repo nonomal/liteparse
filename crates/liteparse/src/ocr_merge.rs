@@ -43,6 +43,10 @@ pub(crate) struct RenderedPage {
     pub pixels: Vec<u8>,
     pub width: u32,
     pub height: u32,
+    /// DPI this page was actually rendered at. Differs from the configured
+    /// DPI when the long-edge cap kicked in (see `MAX_OCR_RENDER_LONG_EDGE_PX`);
+    /// OCR pixel coordinates must be mapped back to PDF points with THIS value.
+    pub dpi: f32,
 }
 
 /// Why a page was flagged as needing more than the cheap text-only path.
@@ -414,6 +418,17 @@ fn count_columns(region: &Region, total_items: usize) -> usize {
 ///
 /// The pdfium `Document` holds raw pointers that are not `Send`, so callers must
 /// drop it before awaiting the OCR engine.
+/// Cap on the rendered long edge (in pixels) for OCR page rasters.
+///
+/// Large-format pages (architectural / engineering sheets, e.g. 24x36in) at the
+/// configured DPI decode to multi-hundred-MB uncompressed rasters; a 50-page
+/// chunk of such sheets peaked >11 GB of native memory and OOM-killed worker
+/// pods, since every raster is pre-rendered and held until its OCR completes.
+/// OCR detectors downscale internally to ~1-2.4k px on the long side, so pixels
+/// beyond ~4k add memory and upload cost without recognition gains. Standard
+/// pages are unaffected (US-Letter at 300 DPI has a 3300 px long edge).
+pub(crate) const MAX_OCR_RENDER_LONG_EDGE_PX: f32 = 4096.0;
+
 pub(crate) fn render_pages_for_ocr(
     document: &Document,
     pages: &[Page],
@@ -429,7 +444,17 @@ pub(crate) fn render_pages_for_ocr(
             continue;
         }
 
-        let bitmap = page_obj.render(dpi)?;
+        // Clamp the render DPI so the long edge stays within the raster budget.
+        let long_edge_pt = page.page_width.max(page.page_height);
+        let mut eff_dpi = dpi;
+        if long_edge_pt > 0.0 {
+            let max_dpi = MAX_OCR_RENDER_LONG_EDGE_PX * 72.0 / long_edge_pt;
+            if eff_dpi > max_dpi {
+                eff_dpi = max_dpi;
+            }
+        }
+
+        let bitmap = page_obj.render(eff_dpi)?;
         let width = bitmap.width() as u32;
         let height = bitmap.height() as u32;
         // Grayscale or RGB per the engine; see `OcrEngine::prefers_grayscale`.
@@ -444,6 +469,7 @@ pub(crate) fn render_pages_for_ocr(
             pixels,
             width,
             height,
+            dpi: eff_dpi,
         });
     }
     Ok(rendered)
@@ -453,7 +479,6 @@ pub(crate) fn render_pages_for_ocr(
 pub(crate) async fn ocr_and_merge_rendered(
     pages: &mut [Page],
     rendered: Vec<RenderedPage>,
-    dpi: f32,
     ocr_engine: Arc<dyn OcrEngine>,
     ocr_language: &str,
     num_workers: usize,
@@ -488,10 +513,11 @@ pub(crate) async fn ocr_and_merge_rendered(
         handles.push((
             r.idx,
             page_number,
+            r.dpi,
             tokio::spawn(async move {
                 // Park the task (not an OS thread) until a permit is available.
                 let _permit = sem.acquire_owned().await.expect("semaphore closed");
-                let options = OcrOptions { language, dpi };
+                let options = OcrOptions { language, dpi: r.dpi };
                 // Offload the (possibly CPU-blocking, e.g. Tesseract) recognize
                 // onto a blocking thread. Because the permit is already held,
                 // at most `num_workers` blocking threads are in use at once,
@@ -512,7 +538,6 @@ pub(crate) async fn ocr_and_merge_rendered(
     }
 
     // Phase 3: collect results and merge into pages.
-    let scale_factor = 72.0 / dpi;
 
     // Track OCR task outcomes so we can distinguish a systemic failure (e.g.
     // missing Tesseract language data, which fails identically on every page)
@@ -531,7 +556,7 @@ pub(crate) async fn ocr_and_merge_rendered(
     let mut failed_sparse_text_page = false;
     let mut first_error: Option<String> = None;
 
-    for (idx, page_number, handle) in handles {
+    for (idx, page_number, page_dpi, handle) in handles {
         let ocr_results: Vec<OcrResult> = match handle.await {
             Ok(Ok(results)) => results,
             Ok(Err(e)) => {
@@ -561,6 +586,10 @@ pub(crate) async fn ocr_and_merge_rendered(
         if ocr_results.is_empty() {
             continue;
         }
+
+        // Pixel -> PDF-point scale for the DPI this page was actually rendered
+        // at (the long-edge cap can lower it below the configured DPI).
+        let scale_factor = 72.0 / page_dpi;
 
         let page = &mut pages[idx];
         // Drop unusable native items (substitution-cipher cmap corruption, or

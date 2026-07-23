@@ -421,12 +421,7 @@ fn count_columns(region: &Region, total_items: usize) -> usize {
 /// Cap on the rendered long edge (in pixels) for OCR page rasters.
 ///
 /// Large-format pages (architectural / engineering sheets, e.g. 24x36in) at the
-/// configured DPI decode to multi-hundred-MB uncompressed rasters; a 50-page
-/// chunk of such sheets peaked >11 GB of native memory and OOM-killed worker
-/// pods, since every raster is pre-rendered and held until its OCR completes.
-/// OCR detectors downscale internally to ~1-2.4k px on the long side, so pixels
-/// beyond ~4k add memory and upload cost without recognition gains. Standard
-/// pages are unaffected (US-Letter at 300 DPI has a 3300 px long edge).
+/// configured DPI decode to multi-hundred-MB uncompressed rasters;
 pub(crate) const MAX_OCR_RENDER_LONG_EDGE_PX: f32 = 4096.0;
 
 pub(crate) fn render_pages_for_ocr(

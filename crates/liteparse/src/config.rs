@@ -55,7 +55,7 @@ pub struct LiteParseConfig {
     /// Extract the tagged-PDF logical structure tree. Default `false`.
     #[serde(default)]
     pub extract_structure_tree: bool,
-    /// Emit each page's `content_bounds` — the union bbox of its top-level
+    /// Emit each page's `content_bounds`: the union bbox of its top-level
     /// content objects in viewport coords (visible content extent). Default
     /// `false` to keep the default output shape unchanged. Content bounds are
     /// still computed internally for the white-fill heuristic whenever
@@ -74,7 +74,7 @@ pub struct LiteParseConfig {
     #[serde(default)]
     pub detect_screenshot_rects: bool,
     /// Draw AcroForm field appearances (filled values, checkbox states) into
-    /// rendered rasters — screenshots and OCR inputs. This initializes a
+    /// rendered rasters (screenshots and OCR inputs). This initializes a
     /// PDFium form-fill environment and runs the document's open/JS actions,
     /// so it is off by default: plain parses should neither execute document
     /// scripts nor change raster bytes for form-bearing PDFs.
@@ -152,7 +152,7 @@ pub struct CropBox {
 ///   where figures live in the document.
 /// * `Embed` — emit the same references as `Placeholder`, and extract the
 ///   embedded pixel bytes into `ParseResult.images` (equivalent to setting
-///   `LiteParseConfig::extract_images`, which `Embed` predates).
+///   `LiteParseConfig::extract_images`).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageMode {
@@ -173,8 +173,8 @@ pub enum OutputFormat {
 impl LiteParseConfig {
     /// Whether embedded-image extraction should run. True when
     /// `extract_images` is set, or when the legacy `ImageMode::Embed` is
-    /// configured — `Embed` implied byte extraction before the two switches
-    /// were decoupled, and existing callers rely on that.
+    /// configured (`Embed` implies byte extraction for backwards
+    /// compatibility).
     pub fn effective_extract_images(&self) -> bool {
         self.extract_images || self.image_mode == ImageMode::Embed
     }

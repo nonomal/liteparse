@@ -76,7 +76,7 @@ When ``extract_images=True``, image extraction is enabled. ``image_output_dir``
 requires that explicit opt-in and writes the extracted bytes to disk. Each
 ``result.images`` entry includes its page bbox, intrinsic pixel dimensions, rotation,
 format, ``name``, and ``path``. Valid source JPEGs are preserved, exact duplicates
-reuse one file, and JSON CLI output contains metadata only—never base64 image data.
+reuse one file, and JSON CLI output contains metadata only (no base64 image data).
 ``image_mode`` controls Markdown presentation only and does not imply extraction.
 With ``extract_images=False``, lightweight Markdown placement refs are still collected
 and ``result.images`` stays empty.

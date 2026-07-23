@@ -14,7 +14,7 @@ pub struct RenderedPage {
     /// True when every pixel has the same color (blank page after render).
     pub is_solid_fill: bool,
     /// Solid rectangles/lines detected in the raster (viewport coords).
-    /// Empty unless rect detection was requested — and always empty for
+    /// Empty unless rect detection was requested; also empty for
     /// solid-fill pages, where detection is skipped.
     pub rects: Vec<ScreenshotRect>,
 }
@@ -123,7 +123,7 @@ fn rgb_at(rgba: &[u8], pixel_index: usize) -> u32 {
     ((rgba[base] as u32) << 16) | ((rgba[base + 1] as u32) << 8) | (rgba[base + 2] as u32)
 }
 
-/// True when every pixel matches the first pixel's RGB (alpha ignored — the
+/// True when every pixel matches the first pixel's RGB (alpha ignored; the
 /// render always starts from an opaque white fill).
 pub(crate) fn is_solid_fill_rgba(rgba: &[u8], width: usize, height: usize) -> bool {
     if width == 0 || height == 0 || rgba.len() < width * height * 4 {

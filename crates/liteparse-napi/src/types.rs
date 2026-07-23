@@ -45,7 +45,7 @@ pub struct JsLiteParseConfig {
     /// Number of concurrent OCR workers (default: CPU cores - 1).
     pub num_workers: Option<u32>,
     /// How to surface raster images in markdown output: "off", "placeholder"
-    /// (default — emits `![](img_pN_K.png)` references with no bytes), or
+    /// (default; emits `![](img_pN_K.png)` references with no bytes), or
     /// "embed" (same presentation as placeholder; extraction is independent).
     pub image_mode: Option<String>,
     /// Extract embedded image bytes and metadata (default false).

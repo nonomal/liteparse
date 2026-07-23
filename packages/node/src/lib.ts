@@ -50,7 +50,7 @@ export interface LiteParseConfig {
   extractContentBounds: boolean;
   /** Detect solid rectangles/lines in rendered page screenshots (default: false). */
   detectScreenshotRects: boolean;
-  /** Draw AcroForm field appearances into rendered rasters — screenshots and OCR inputs (runs document open/JS actions; default: false). */
+  /** Draw AcroForm field appearances into rendered rasters (screenshots and OCR inputs; runs document open/JS actions; default: false). */
   renderFormFields: boolean;
   preserveVerySmallText: boolean;
   password?: string;

@@ -88,11 +88,10 @@ pub struct TextItem {
 }
 
 /// The `TextItem` fields governed by `extract_text_metadata`, pre-gated by
-/// [`TextItem::text_metadata`]. This is the single source of truth for which
-/// fields count as rich text metadata: every output surface (CLI JSON, napi,
-/// python, wasm) builds its public items from this struct, so a new metadata
-/// field added here is a compile error in each surface until it is wired
-/// through — instead of a silent schema drift between bindings.
+/// [`TextItem::text_metadata`]. This struct defines which fields count as
+/// rich text metadata: every output surface (CLI JSON, napi, python, wasm)
+/// builds its public items from it, so a new metadata field added here is a
+/// compile error in each surface until it is wired through.
 ///
 /// All fields are `Option`/slice so "extraction disabled" is representable
 /// even for the plain-`bool` fields on `TextItem`: `None`/empty means the
@@ -235,7 +234,7 @@ pub struct StructureTree {
     pub roots: Vec<StructureTreeElement>,
 }
 
-/// One tagged-PDF structure element. Field names intentionally use the
+/// One tagged-PDF structure element. Field names follow the
 /// repository's snake_case JSON convention rather than PDFium's C spellings.
 #[derive(Debug, Clone, Serialize)]
 pub struct StructureTreeElement {
@@ -319,8 +318,8 @@ pub struct ScreenshotRect {
     pub height: f32,
     /// Fill color as ARGB hex string (e.g. "ff1a2b3c").
     pub color: String,
-    /// True when only one dimension reaches the minimum rectangle size —
-    /// a solid line rather than a filled area.
+    /// True when only one dimension reaches the minimum rectangle size
+    /// (a solid line rather than a filled area).
     pub is_line: bool,
 }
 
@@ -438,11 +437,11 @@ pub struct ImageRef {
 }
 
 /// A raster image extracted from a page along with its pixel bytes. Surfaced
-/// on `ParseResult.images` only when `extract_images` is enabled — otherwise
+/// on `ParseResult.images` only when `extract_images` is enabled; otherwise
 /// the extraction step skips the render and only `ImageRef`s are
-/// produced. Other images are encoded as PNG from PDFium's rendered bitmap.
-/// JPEG streams are preserved without re-encoding when PDFium
-/// exposes a valid directly decoded DCT stream.
+/// produced. JPEG streams are preserved without re-encoding when PDFium
+/// exposes a valid directly decoded DCT stream; other images are encoded as
+/// PNG from PDFium's rendered bitmap.
 #[derive(Debug, Clone, Serialize)]
 pub struct ExtractedImage {
     pub id: String,

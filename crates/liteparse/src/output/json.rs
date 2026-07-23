@@ -73,9 +73,9 @@ pub(crate) struct ParseResultJson {
     pub image_error_count: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub form_type: Option<i32>,
-    /// Raw XFA packets — present only when `extract_xfa_packets` was
+    /// Raw XFA packets, present only when `extract_xfa_packets` was
     /// requested, so the default CLI JSON stays stable. The document's
-    /// `/Info` creator/producer are deliberately API-only
+    /// `/Info` creator/producer are API-only
     /// (`ParseResult.creator`/`.producer`) for the same reason.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub xfa_packets: Option<Vec<XfaPacket>>,
@@ -128,8 +128,8 @@ pub(crate) fn build_json(pages: &[ParsedPage], extract_text_metadata: bool) -> P
                             width: item.width,
                             height: item.height,
                             // Not part of TextMetadata: the API surfaces always
-                            // expose rotation (it predates the metadata flag);
-                            // only the CLI JSON gates it to stay byte-stable.
+                            // expose rotation; only the CLI JSON gates it to
+                            // keep the default output byte-stable.
                             rotation: extract_text_metadata.then_some(item.rotation),
                             font_name: item.font_name.clone(),
                             font_size: item.font_size,

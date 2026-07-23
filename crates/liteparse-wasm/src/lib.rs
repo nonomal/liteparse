@@ -302,7 +302,7 @@ pub struct TextItem {
     pub confidence: Option<f32>,
     /// Rotation in degrees (viewport space).
     pub rotation: f32,
-    // Rich text metadata — present only when `extractTextMetadata` is set.
+    // Rich text metadata; present only when `extractTextMetadata` is set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font_height: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -854,8 +854,8 @@ impl LiteParse {
                     .text_items
                     .iter()
                     .map(|i| {
-                        // Core-gated metadata view — the single source of
-                        // truth for which fields `extractTextMetadata` covers.
+                        // Core-gated metadata view; `TextMetadata` defines
+                        // which fields `extractTextMetadata` covers.
                         let meta = i.text_metadata(extract_text_metadata);
                         TextItem {
                             text: i.text.clone(),

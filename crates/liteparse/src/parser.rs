@@ -105,7 +105,7 @@ fn write_extracted_images(
 /// canonical entry's file name. The markdown emitter references each figure
 /// by its own placement id (`![](img_p2_1.jpg)`), but only the canonical
 /// file is written to disk (see `write_extracted_images`), so duplicate
-/// placements must reference the canonical name — the same resolution the
+/// placements must reference the canonical name, matching the resolution the
 /// LlamaParse worker applies via `resolveOutputImageName`.
 fn rewrite_duplicate_image_refs(
     pages: &mut [ParsedPage],

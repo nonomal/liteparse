@@ -35,7 +35,7 @@ export interface JsLiteParseConfig {
   numWorkers?: number
   /**
    * How to surface raster images in markdown output: "off", "placeholder"
-   * (default — emits `![](img_pN_K.png)` references with no bytes), or
+   * (default; emits `![](img_pN_K.png)` references with no bytes), or
    * "embed" (same presentation as placeholder; extraction is independent).
    */
   imageMode?: string

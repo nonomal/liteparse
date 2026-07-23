@@ -80,7 +80,7 @@ When `extractImages` is true, image extraction is enabled. `imageOutputDir` requ
 that explicit opt-in and writes the extracted bytes to disk. Each
 `result.images` entry includes its page bbox, intrinsic pixel dimensions, rotation,
 format, `name`, and `path`. Valid source JPEGs are preserved, exact duplicates reuse
-one file, and JSON CLI output contains metadata only—never base64 image data.
+one file, and JSON CLI output contains metadata only (no base64 image data).
 `imageMode` controls Markdown presentation only and does not imply extraction. With
 `extractImages: false`, lightweight Markdown placement refs are still collected and
 `result.images` stays empty.
@@ -100,7 +100,7 @@ title, typed attributes, MCIDs, children, and referenced link annotations. Untag
 pages have an empty `roots` array; the field is omitted when disabled.
 
 Every result also carries the document's `/Info` `creator`/`producer` when
-present (API-level only — not in CLI JSON), and with `extractContentBounds`
+present (API-level only, not in CLI JSON), and with `extractContentBounds`
 each page carries a `contentBounds` union bbox of its top-level content
 objects. With `extractXfaPackets`, `result.xfaPackets` lists each raw XFA
 packet (index, name, content length, XML content); non-XFA documents yield an

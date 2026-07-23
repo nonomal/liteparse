@@ -526,8 +526,8 @@ struct CachedImage {
 }
 
 /// Dedup key: hash of the source stream plus the metadata that affects
-/// decoding. The full raw bytes are still compared on lookup (hash prefilter,
-/// not trust-the-hash), but only within the matching bucket.
+/// decoding. The hash only prefilters; the full raw bytes are still compared
+/// on lookup within the matching bucket.
 #[derive(PartialEq, Eq, Hash)]
 struct CacheKey {
     raw_hash: u64,
@@ -836,8 +836,8 @@ fn build_vector_graphics(paths: &[PathObject], content_bounds: Option<&Rect>) ->
         .collect();
 
     // LlamaParse collapses consecutively drawn, same-color solid fills when
-    // one contains the other. Preserve order because intervening paint
-    // operations intentionally stop merging.
+    // one contains the other. Preserve order: an intervening paint operation
+    // stops merging.
     let mut keep = vec![true; raw_shapes.len()];
     for i in 0..raw_shapes.len().saturating_sub(1) {
         if !keep[i] || !mergeable_shape(&raw_shapes[i]) {
@@ -914,8 +914,8 @@ fn build_vector_graphics(paths: &[PathObject], content_bounds: Option<&Rect>) ->
 
 /// Port of the LlamaParse extract binary's `PATH_FLAGS_WHITE_FILL` heuristic.
 /// An unstroked solid-white fill is background paint when it is aligned to
-/// the page's content margin, or when it is drawn immediately after — and
-/// overlaps — another white-filled area (pdf writers often paint the
+/// the page's content margin, or when it is drawn immediately after and
+/// overlapping another white-filled area (pdf writers often paint the
 /// background left-to-right, top-to-bottom as a run of adjacent fills).
 /// Flagged shapes keep their bbox in `shapes` (still useful for chart /
 /// spreadsheet layout detection) but contribute no line segments, which

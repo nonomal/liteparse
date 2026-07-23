@@ -512,7 +512,10 @@ pub(crate) async fn ocr_and_merge_rendered(
             tokio::spawn(async move {
                 // Park the task (not an OS thread) until a permit is available.
                 let _permit = sem.acquire_owned().await.expect("semaphore closed");
-                let options = OcrOptions { language, dpi: r.dpi };
+                let options = OcrOptions {
+                    language,
+                    dpi: r.dpi,
+                };
                 // Offload the (possibly CPU-blocking, e.g. Tesseract) recognize
                 // onto a blocking thread. Because the permit is already held,
                 // at most `num_workers` blocking threads are in use at once,
@@ -1198,6 +1201,7 @@ mod tests {
             pixels: vec![0u8],
             width: 1,
             height: 1,
+            dpi: 72.0,
         }
     }
 
@@ -1254,8 +1258,7 @@ mod tests {
         let rendered = vec![make_rendered(0), make_rendered(1)];
         let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
 
-        let result =
-            ocr_and_merge_rendered(&mut pages, rendered, 72.0, engine, "eng", 2, true).await;
+        let result = ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, true).await;
 
         let err = result.expect_err("expected systemic OCR failure to be surfaced");
         let msg = err.to_string();
@@ -1276,8 +1279,7 @@ mod tests {
         let mut pages = vec![make_blank_page(1)];
         let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
 
-        let result =
-            ocr_and_merge_rendered(&mut pages, Vec::new(), 72.0, engine, "eng", 2, true).await;
+        let result = ocr_and_merge_rendered(&mut pages, Vec::new(), engine, "eng", 2, true).await;
 
         assert!(result.is_ok(), "empty OCR set should succeed: {result:?}");
     }
@@ -1291,8 +1293,7 @@ mod tests {
         let rendered = vec![make_rendered(0), make_rendered(1)];
         let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
 
-        let result =
-            ocr_and_merge_rendered(&mut pages, rendered, 72.0, engine, "eng", 2, true).await;
+        let result = ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, true).await;
 
         assert!(
             result.is_ok(),
@@ -1312,8 +1313,7 @@ mod tests {
         let rendered = vec![make_rendered(0), make_rendered(1)];
         let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
 
-        let result =
-            ocr_and_merge_rendered(&mut pages, rendered, 72.0, engine, "eng", 2, true).await;
+        let result = ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, true).await;
 
         let err = result.expect_err("a text-starved page losing all OCR must surface an error");
         assert!(
@@ -1331,8 +1331,7 @@ mod tests {
         let rendered = vec![make_rendered(0)];
         let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
 
-        let result =
-            ocr_and_merge_rendered(&mut pages, rendered, 72.0, engine, "eng", 2, true).await;
+        let result = ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, true).await;
 
         let err = result.expect_err("low-coverage text page losing OCR must surface an error");
         assert!(
@@ -1351,8 +1350,7 @@ mod tests {
         let rendered = vec![make_rendered(0), make_rendered(1)];
         let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
 
-        let result =
-            ocr_and_merge_rendered(&mut pages, rendered, 72.0, engine, "eng", 2, false).await;
+        let result = ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, false).await;
 
         assert!(
             result.is_ok(),

@@ -551,7 +551,6 @@ impl LiteParse {
             ocr_merge::ocr_and_merge_rendered(
                 &mut pages,
                 ocr_rendered,
-                self.config.dpi,
                 engine,
                 &self.config.ocr_language,
                 self.config.num_workers,

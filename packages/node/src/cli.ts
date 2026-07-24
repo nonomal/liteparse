@@ -2,6 +2,7 @@
 
 import { program } from "commander";
 import { LiteParse, type LiteParseConfig } from "./lib.js";
+import { parseResultToCliJson } from "./cli-json.js";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { join, relative, parse as parsePath } from "node:path";
 
@@ -62,7 +63,19 @@ program
     "--image-output-dir <dir>",
     "Directory to write embedded images to when --image-mode embed is set",
   )
+  .option("--extract-images", "Extract embedded image bytes and metadata")
   .option("--no-links", "Disable hyperlink extraction (emit plain anchor text)")
+  .option("--extract-annotations", "Include all PDF annotations in page output")
+  .option("--extract-form-fields", "Include AcroForm widget fields and values")
+  .option("--extract-structure-tree", "Include the tagged-PDF logical structure tree")
+  .option(
+    "--extract-xfa-packets",
+    "Include raw XFA packets (name + XML content) in JSON output",
+  )
+  .option(
+    "--extract-content-bounds",
+    "Include each page's content_bounds in JSON output",
+  )
   .option("--ocr-server-url <url>", "HTTP OCR server URL")
   .option(
     "--ocr-server-header <header>",
@@ -78,6 +91,10 @@ program
   )
   .option("--dpi <dpi>", "Rendering DPI", parseFloat)
   .option("--preserve-small-text", "Keep very small text")
+  .option(
+    "--extract-text-metadata",
+    "Include rich PDF text metadata in text items and JSON output",
+  )
   .option("--password <password>", "Password for encrypted documents")
   .option("--config <file>", "JSON config file path")
   .option("-q, --quiet", "Suppress progress output")
@@ -85,6 +102,10 @@ program
   .option(
     "--complexity",
     "Include per-page complexity signals in JSON output",
+  )
+  .option(
+    "--extract-vector-graphics",
+    "Include page-scoped vector shapes and merged horizontal/vertical lines",
   )
   .action(async (file: string, opts: Record<string, unknown>) => {
     try {
@@ -102,7 +123,15 @@ program
       if (opts.format) config.outputFormat = opts.format as "json" | "text" | "markdown";
       if (opts.imageMode)
         config.imageMode = opts.imageMode as "off" | "placeholder" | "embed";
+      if (opts.imageOutputDir)
+        config.imageOutputDir = opts.imageOutputDir as string;
+      if (opts.extractImages) config.extractImages = true;
       if (opts.links === false) config.extractLinks = false;
+      if (opts.extractAnnotations) config.extractAnnotations = true;
+      if (opts.extractFormFields) config.extractFormFields = true;
+      if (opts.extractStructureTree) config.extractStructureTree = true;
+      if (opts.extractXfaPackets) config.extractXfaPackets = true;
+      if (opts.extractContentBounds) config.extractContentBounds = true;
       if (opts.ocrServerUrl)
         config.ocrServerUrl = opts.ocrServerUrl as string;
       if (opts.ocrServerHeader)
@@ -113,10 +142,12 @@ program
       if (opts.targetPages) config.targetPages = opts.targetPages as string;
       if (opts.dpi) config.dpi = opts.dpi as number;
       if (opts.preserveSmallText) config.preserveVerySmallText = true;
+      if (opts.extractTextMetadata) config.extractTextMetadata = true;
       if (opts.password) config.password = opts.password as string;
       if (opts.quiet) config.quiet = true;
       if (opts.numWorkers) config.numWorkers = opts.numWorkers as number;
       if (opts.complexity) config.includeComplexity = true;
+      if (opts.extractVectorGraphics) config.extractVectorGraphics = true;
 
       // Default CLI output to text (library defaults to json)
       if (!config.outputFormat) config.outputFormat = "text";
@@ -127,32 +158,14 @@ program
       const output =
         config.outputFormat === "json"
           ? JSON.stringify(
-              {
-                pages: result.pages.map((p) => ({
-                  page: p.pageNum,
-                  width: p.width,
-                  height: p.height,
-                  text: p.text,
-                  textItems: p.textItems,
-                })),
-              },
+              parseResultToCliJson(result, {
+                extractTextMetadata: config.extractTextMetadata,
+              }),
               null,
               2,
             )
           : result.text;
 
-      if (opts.imageOutputDir && result.images.length > 0) {
-        const dir = opts.imageOutputDir as string;
-        mkdirSync(dir, { recursive: true });
-        for (const img of result.images) {
-          writeFileSync(join(dir, `image_${img.id}.${img.format}`), img.bytes);
-        }
-        if (!opts.quiet) {
-          console.error(
-            `[liteparse] wrote ${result.images.length} image(s) to ${dir}`,
-          );
-        }
-      }
 
       if (opts.output) {
         writeFileSync(opts.output as string, output, "utf-8");
@@ -313,6 +326,26 @@ program
   .option("--password <password>", "Password for encrypted documents")
   .option("-q, --quiet", "Suppress progress output")
   .option("--num-workers <n>", "Number of concurrent OCR workers", parseInt)
+  .option(
+    "--extract-text-metadata",
+    "Include rich PDF text metadata in text items and JSON output",
+  )
+  .option("--extract-images", "Extract embedded image bytes and metadata")
+  .option("--extract-annotations", "Include all PDF annotations in page output")
+  .option("--extract-form-fields", "Include AcroForm widget fields and values")
+  .option("--extract-structure-tree", "Include the tagged-PDF logical structure tree")
+  .option(
+    "--extract-xfa-packets",
+    "Include raw XFA packets (name + XML content) in JSON output",
+  )
+  .option(
+    "--extract-content-bounds",
+    "Include each page's content_bounds in JSON output",
+  )
+  .option(
+    "--extract-vector-graphics",
+    "Include page-scoped vector shapes and merged horizontal/vertical lines",
+  )
   .action(
     async (
       inputDir: string,
@@ -334,6 +367,17 @@ program
         if (opts.password) config.password = opts.password as string;
         if (opts.quiet) config.quiet = true;
         if (opts.numWorkers) config.numWorkers = opts.numWorkers as number;
+        if (opts.extractTextMetadata) config.extractTextMetadata = true;
+        if (opts.extractImages) config.extractImages = true;
+        if (opts.extractAnnotations) config.extractAnnotations = true;
+        if (opts.extractFormFields) config.extractFormFields = true;
+        if (opts.extractStructureTree) config.extractStructureTree = true;
+        if (opts.extractXfaPackets) config.extractXfaPackets = true;
+        if (opts.extractContentBounds) config.extractContentBounds = true;
+      if (opts.extractContentBounds) config.extractContentBounds = true;
+      if (opts.extractXfaPackets) config.extractXfaPackets = true;
+      if (opts.extractContentBounds) config.extractContentBounds = true;
+        if (opts.extractVectorGraphics) config.extractVectorGraphics = true;
 
         const parser = new LiteParse(config);
         const outExt = format === "json" ? ".json" : format === "markdown" ? ".md" : ".txt";
@@ -383,15 +427,9 @@ program
             const output =
               format === "json"
                 ? JSON.stringify(
-                    {
-                      pages: result.pages.map((p) => ({
-                        page: p.pageNum,
-                        width: p.width,
-                        height: p.height,
-                        text: p.text,
-                        textItems: p.textItems,
-                      })),
-                    },
+                    parseResultToCliJson(result, {
+                      extractTextMetadata: config.extractTextMetadata,
+                    }),
                     null,
                     2,
                   )

@@ -35,15 +35,45 @@ export interface JsLiteParseConfig {
   numWorkers?: number
   /**
    * How to surface raster images in markdown output: "off", "placeholder"
-   * (default — emits `![](image_pN_K.png)` references with no bytes), or
-   * "embed" (also returns each image's PNG bytes on `images`).
+   * (default; emits `![](img_pN_K.png)` references with no bytes), or
+   * "embed" (same presentation as placeholder; extraction is independent).
    */
   imageMode?: string
+  /** Extract embedded image bytes and metadata (default false). */
+  extractImages?: boolean
+  /**
+   * Directory where embedded image files are written. Requires
+   * `extractImages` to be true.
+   */
+  imageOutputDir?: string
   /**
    * Render hyperlink annotations as `[text](url)` in markdown output
    * (default true). Set false for plain anchor text.
    */
   extractLinks?: boolean
+  /** Extract all PDF annotations as page-scoped structured data. */
+  extractAnnotations?: boolean
+  /** Extract AcroForm widget fields and values. */
+  extractFormFields?: boolean
+  /** Extract the tagged-PDF logical structure tree. */
+  extractStructureTree?: boolean
+  /**
+   * Extract raw XFA packets (name + XML content) into
+   * `ParseResult.xfaPackets`. Default false.
+   */
+  extractXfaPackets?: boolean
+  /**
+   * Emit each page's `contentBounds` (union bbox of top-level content
+   * objects, viewport coords). Default false.
+   */
+  extractContentBounds?: boolean
+  /**
+   * Detect solid rectangles/lines in rendered page screenshots and attach
+   * them to each screenshot result. Default false.
+   */
+  detectScreenshotRects?: boolean
+  /** Draw AcroForm field appearances into rendered rasters (runs document open/JS actions). Default false. */
+  renderFormFields?: boolean
   /**
    * Whether a systemic OCR failure aborts the whole parse (default true).
    * Set false to keep already-recovered native text and return partial
@@ -62,6 +92,8 @@ export interface JsLiteParseConfig {
    * for word-level bbox attribution.
    */
   emitWordBoxes?: boolean
+  /** Include rich PDF text metadata on returned text items. Default false. */
+  extractTextMetadata?: boolean
   /**
    * Restrict output to a page sub-region. Each field is the fraction of the
    * page cropped from that side; a text item survives only if it lies
@@ -79,6 +111,8 @@ export interface JsLiteParseConfig {
    * Default false; enabling it runs an extra vector-text detection pass.
    */
   includeComplexity?: boolean
+  /** Expose page-scoped vector path extraction. Default false. */
+  extractVectorGraphics?: boolean
 }
 /**
  * A page sub-region as the fraction cropped from each side (top-left origin,
@@ -106,6 +140,21 @@ export interface JsTextItem {
   height: number
   fontName?: string
   fontSize?: number
+  fontHeight?: number
+  fontAscent?: number
+  fontDescent?: number
+  fontWeight?: number
+  textWidth?: number
+  fontIsBuggy?: boolean
+  mcid?: number
+  /** Fill color as an eight-character ARGB hex string. */
+  fillColor?: string
+  /** Stroke color as an eight-character ARGB hex string. */
+  strokeColor?: string
+  /** Raw PDF content-stream character codes for the source glyphs. */
+  charCodes?: Array<number>
+  /** True when the trailing source space was synthesized by PDFium. */
+  trailingSpaceGenerated?: boolean
   confidence?: number
   /** Rotation in degrees (viewport space). Defaults to 0 when omitted. */
   rotation?: number
@@ -162,20 +211,142 @@ export interface JsParsedPage {
   pageNum: number
   width: number
   height: number
+  /**
+   * Union bbox of the page's top-level content objects in viewport
+   * coords (visible content extent). Absent for empty pages.
+   */
+  contentBounds?: JsRect
   text: string
   markdown: string
   textItems: Array<JsTextItem>
   complexity?: JsPageComplexityStats
+  vectorGraphics?: JsVectorGraphics
+  annotations?: Array<JsDocumentAnnotation>
+  formFields?: Array<JsFormField>
+  structureTree?: JsStructureTree
+}
+export interface JsStructureAttribute {
+  name: string
+  booleanValue?: boolean
+  numberValue?: number
+  stringValue?: string
+}
+export interface JsStructureTree {
+  roots: Array<JsStructureTreeElement>
+}
+export interface JsStructureTreeElement {
+  elementType: string
+  id?: string
+  actualText?: string
+  altText?: string
+  title?: string
+  attributes: Array<JsStructureAttribute>
+  markedContentIds: Array<number>
+  children: Array<JsStructureTreeElement>
+  annotations: Array<JsDocumentAnnotation>
+}
+export interface JsVectorShape {
+  bbox: JsRect
+  stroke: boolean
+  strokeColor?: string
+  fill: boolean
+  fillColor?: string
+  hasCurve: boolean
+}
+export interface JsRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+export interface JsAnnotationRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+export interface JsVectorLine {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  stroke: boolean
+  strokeWidth?: number
+  strokeColor?: string
+  fill: boolean
+  fillColor?: string
+}
+export interface JsVectorGraphics {
+  shapes: Array<JsVectorShape>
+  lines: Array<JsVectorLine>
+}
+export interface JsDocumentAnnotation {
+  subtype: string
+  contents?: string
+  created?: string
+  modified?: string
+  title?: string
+  rect?: JsAnnotationRect
+  quadpointRects: Array<JsAnnotationRect>
+  uri?: string
+}
+export interface JsFormField {
+  id: string
+  fieldType: string
+  page: number
+  annotationIndex: number
+  widgetIndex: number
+  objectNumber?: number
+  name?: string
+  alternateName?: string
+  value?: string
+  exportValue?: string
+  fieldFlags: number
+  controlCount?: number
+  controlIndex?: number
+  checked?: boolean
+  rect?: JsAnnotationRect
+  options: Array<string>
+  selectedOptions: Array<string>
 }
 export interface JsParseResult {
   pages: Array<JsParsedPage>
   text: string
   images: Array<JsExtractedImage>
+  imageErrorCount: number
+  formType?: number
+  /** The document's `/Info` `Creator` entry, when present. */
+  creator?: string
+  /** The document's `/Info` `Producer` entry, when present. */
+  producer?: string
+  /** Raw XFA packets; present only when `extractXfaPackets` is enabled. */
+  xfaPackets?: Array<JsXfaPacket>
+}
+/** One raw packet from an XFA form document's `/XFA` array. */
+export interface JsXfaPacket {
+  index: number
+  name?: string
+  contentLength: number
+  /** Packet content (usually XML), lossily decoded as UTF-8. */
+  content?: string
+}
+export interface JsImageRect {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 export interface JsExtractedImage {
   id: string
+  name: string
+  path?: string
   page: number
+  bbox: JsImageRect
+  width: number
+  height: number
+  rotation: number
   format: string
+  duplicateOf?: string
   bytes: Buffer
 }
 export interface JsScreenshotResult {
@@ -183,6 +354,37 @@ export interface JsScreenshotResult {
   width: number
   height: number
   imageBuffer: Buffer
+  /** True when every pixel has the same color (blank page after render). */
+  isSolidFill: boolean
+  /**
+   * Solid rectangles/lines detected in the raster (viewport coords).
+   * Populated only when `detectScreenshotRects` is enabled.
+   */
+  rects: Array<JsScreenshotRect>
+}
+/**
+ * One solid rectangle (or line) detected in a rendered page bitmap, in
+ * viewport coords (top-left origin, 72 DPI).
+ */
+export interface JsScreenshotRect {
+  x: number
+  y: number
+  width: number
+  height: number
+  /** Fill color as ARGB hex string (e.g. "ff1a2b3c"). */
+  color: string
+  /** True when the region is a solid line rather than a filled area. */
+  isLine: boolean
+}
+export interface JsLayoutComplexityStats {
+  columnCount: number
+  ruledTableCount: number
+  ruledTableCoverage: number
+  textTableRunCount: number
+  figureCount: number
+  figureCoverage: number
+  isComplex: boolean
+  reasons: Array<string>
 }
 export interface JsPageComplexityStats {
   pageNumber: number
@@ -198,6 +400,7 @@ export interface JsPageComplexityStats {
   pageArea: number
   needsOcr: boolean
   reasons: Array<string>
+  layout?: JsLayoutComplexityStats
 }
 /** Search text items for phrase matches, returning merged items with combined bounding boxes. */
 export declare function searchItems(items: Array<JsTextItem>, phrase: string, caseSensitive?: boolean | undefined | null): Array<JsTextItem>

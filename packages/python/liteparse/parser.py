@@ -7,17 +7,75 @@ from liteparse._liteparse import LiteParse as _NativeLiteParse
 from liteparse._liteparse import search_items as _native_search_items
 
 from .types import (
+    AnnotationRect,
+    DocumentAnnotation,
+    FormField,
+    StructureTree,
+    StructureTreeElement,
     ExtractedImage,
+    ImageRect,
     LayoutComplexityStats,
     LiteParseConfig,
     PageComplexityStats,
     ParsedPage,
     ParseError,
     ParseResult,
+    ScreenshotRect,
     ScreenshotResult,
     TextItem,
+    XfaPacket,
     WordBox,
+    VectorGraphics,
+    VectorLine,
+    VectorShape,
 )
+
+
+def _convert_annotation(annotation: Any) -> DocumentAnnotation:
+    return DocumentAnnotation(
+        subtype=annotation.subtype,
+        contents=annotation.contents,
+        created=annotation.created,
+        modified=annotation.modified,
+        title=annotation.title,
+        rect=(
+            AnnotationRect(
+                x=annotation.rect.x,
+                y=annotation.rect.y,
+                width=annotation.rect.width,
+                height=annotation.rect.height,
+            )
+            if annotation.rect is not None
+            else None
+        ),
+        quadpoint_rects=[
+            AnnotationRect(x=r.x, y=r.y, width=r.width, height=r.height)
+            for r in annotation.quadpoint_rects
+        ],
+        uri=annotation.uri,
+    )
+
+
+def _convert_structure_element(element: Any) -> StructureTreeElement:
+    attributes = {}
+    for attribute in element.attributes:
+        if attribute.boolean_value is not None:
+            attributes[attribute.name] = attribute.boolean_value
+        elif attribute.number_value is not None:
+            attributes[attribute.name] = attribute.number_value
+        elif attribute.string_value is not None:
+            attributes[attribute.name] = attribute.string_value
+    return StructureTreeElement(
+        element_type=element.element_type,
+        id=element.id,
+        actual_text=element.actual_text,
+        alt_text=element.alt_text,
+        title=element.title,
+        attributes=attributes,
+        marked_content_ids=list(element.marked_content_ids),
+        children=[_convert_structure_element(child) for child in element.children],
+        annotations=[_convert_annotation(a) for a in element.annotations],
+    )
 
 
 def _convert_complexity(s: Any) -> PageComplexityStats:
@@ -66,6 +124,17 @@ def _convert_native_result(native_result: Any) -> ParseResult:
                 height=item.height,
                 font_name=item.font_name,
                 font_size=item.font_size,
+                font_height=getattr(item, "font_height", None),
+                font_ascent=getattr(item, "font_ascent", None),
+                font_descent=getattr(item, "font_descent", None),
+                font_weight=getattr(item, "font_weight", None),
+                text_width=getattr(item, "text_width", None),
+                font_is_buggy=getattr(item, "font_is_buggy", False),
+                mcid=getattr(item, "mcid", None),
+                fill_color=getattr(item, "fill_color", None),
+                stroke_color=getattr(item, "stroke_color", None),
+                char_codes=list(getattr(item, "char_codes", [])),
+                trailing_space_generated=getattr(item, "trailing_space_generated", False),
                 confidence=item.confidence,
                 rotation=getattr(item, "rotation", 0.0),
                 words=[
@@ -82,11 +151,30 @@ def _convert_native_result(native_result: Any) -> ParseResult:
             for item in native_page.text_items
         ]
         native_complexity = getattr(native_page, "complexity", None)
+        native_vectors = getattr(native_page, "vector_graphics", None)
+        native_annotations = getattr(native_page, "annotations", None)
+        native_form_fields = getattr(native_page, "form_fields", None)
+        native_structure_tree = getattr(native_page, "structure_tree", None)
         pages.append(
             ParsedPage(
                 page_num=native_page.page_num,
                 width=native_page.width,
                 height=native_page.height,
+                content_bounds=(
+                    (
+                        native_content_bounds.x,
+                        native_content_bounds.y,
+                        native_content_bounds.width,
+                        native_content_bounds.height,
+                    )
+                    if (
+                        native_content_bounds := getattr(
+                            native_page, "content_bounds", None
+                        )
+                    )
+                    is not None
+                    else None
+                ),
                 text=native_page.text,
                 markdown=native_page.markdown,
                 text_items=text_items,
@@ -95,21 +183,152 @@ def _convert_native_result(native_result: Any) -> ParseResult:
                     if native_complexity is not None
                     else None
                 ),
+                vector_graphics=(
+                    VectorGraphics(
+                        shapes=[
+                            VectorShape(
+                                bbox=(s.bbox.x, s.bbox.y, s.bbox.width, s.bbox.height),
+                                stroke=s.stroke,
+                                stroke_color=s.stroke_color,
+                                fill=s.fill,
+                                fill_color=s.fill_color,
+                                has_curve=s.has_curve,
+                            )
+                            for s in native_vectors.shapes
+                        ],
+                        lines=[
+                            VectorLine(
+                                x1=l.x1,
+                                y1=l.y1,
+                                x2=l.x2,
+                                y2=l.y2,
+                                stroke=l.stroke,
+                                stroke_width=l.stroke_width,
+                                stroke_color=l.stroke_color,
+                                fill=l.fill,
+                                fill_color=l.fill_color,
+                            )
+                            for l in native_vectors.lines
+                        ],
+                    )
+                    if native_vectors is not None
+                    else None
+                ),
+                annotations=(
+                    [
+                        DocumentAnnotation(
+                            subtype=annotation.subtype,
+                            contents=annotation.contents,
+                            created=annotation.created,
+                            modified=annotation.modified,
+                            title=annotation.title,
+                            rect=(
+                                AnnotationRect(
+                                    x=annotation.rect.x,
+                                    y=annotation.rect.y,
+                                    width=annotation.rect.width,
+                                    height=annotation.rect.height,
+                                )
+                                if annotation.rect is not None
+                                else None
+                            ),
+                            quadpoint_rects=[
+                                AnnotationRect(
+                                    x=rect.x,
+                                    y=rect.y,
+                                    width=rect.width,
+                                    height=rect.height,
+                                )
+                                for rect in annotation.quadpoint_rects
+                            ],
+                            uri=annotation.uri,
+                        )
+                        for annotation in native_annotations
+                    ]
+                    if native_annotations is not None
+                    else None
+                ),
+                form_fields=(
+                    [
+                        FormField(
+                            id=form.id,
+                            field_type=form.field_type,
+                            page=form.page,
+                            annotation_index=form.annotation_index,
+                            widget_index=form.widget_index,
+                            object_number=form.object_number,
+                            name=form.name,
+                            alternate_name=form.alternate_name,
+                            value=form.value,
+                            export_value=form.export_value,
+                            field_flags=form.field_flags,
+                            control_count=form.control_count,
+                            control_index=form.control_index,
+                            checked=form.checked,
+                            rect=(AnnotationRect(form.rect.x, form.rect.y, form.rect.width, form.rect.height) if form.rect is not None else None),
+                            options=list(form.options),
+                            selected_options=list(form.selected_options),
+                        )
+                        for form in native_form_fields
+                    ]
+                    if native_form_fields is not None
+                    else None
+                ),
+                structure_tree=(
+                    StructureTree(
+                        roots=[
+                            _convert_structure_element(root)
+                            for root in native_structure_tree.roots
+                        ]
+                    )
+                    if native_structure_tree is not None
+                    else None
+                ),
             )
         )
     images = [
         ExtractedImage(
             id=img.id,
+            name=img.name,
+            path=img.path,
             page=img.page,
+            bbox=ImageRect(
+                x=img.bbox.x,
+                y=img.bbox.y,
+                width=img.bbox.width,
+                height=img.bbox.height,
+            ),
+            width=img.width,
+            height=img.height,
+            rotation=img.rotation,
             format=img.format,
             bytes=img.bytes,
+            duplicate_of=img.duplicate_of,
         )
         for img in getattr(native_result, "images", [])
     ]
+    native_xfa_packets = getattr(native_result, "xfa_packets", None)
     return ParseResult(
         pages=pages,
         text=native_result.text,
         images=images,
+        image_error_count=getattr(native_result, "image_error_count", 0),
+        form_type=getattr(native_result, "form_type", None),
+        creator=getattr(native_result, "creator", None),
+        producer=getattr(native_result, "producer", None),
+        xfa_packets=(
+            [
+                XfaPacket(
+                    index=packet.index,
+                    name=packet.name,
+                    content_length=packet.content_length,
+                    content=packet.content,
+                )
+                for packet in native_xfa_packets
+            ]
+            if native_xfa_packets is not None
+            else None
+        ),
     )
 
 
@@ -143,13 +362,24 @@ class LiteParse:
         quiet: Optional[bool] = None,
         num_workers: Optional[int] = None,
         image_mode: Optional[str] = None,
+        extract_images: Optional[bool] = None,
+        image_output_dir: Optional[Union[str, Path]] = None,
         extract_links: Optional[bool] = None,
+        extract_annotations: Optional[bool] = None,
+        extract_form_fields: Optional[bool] = None,
+        extract_structure_tree: Optional[bool] = None,
+        extract_xfa_packets: Optional[bool] = None,
+        extract_content_bounds: Optional[bool] = None,
+        detect_screenshot_rects: Optional[bool] = None,
+        render_form_fields: Optional[bool] = None,
         ocr_failure_fatal: Optional[bool] = None,
         ocr_hedge_delays_ms: Optional[List[int]] = None,
         emit_word_boxes: Optional[bool] = None,
+        extract_text_metadata: Optional[bool] = None,
         crop_box: Optional[Tuple[float, float, float, float]] = None,
         skip_diagonal_text: Optional[bool] = None,
         include_complexity: Optional[bool] = None,
+        extract_vector_graphics: Optional[bool] = None,
     ):
         """
         Initialize LiteParse parser.
@@ -171,6 +401,18 @@ class LiteParse:
             num_workers: Number of concurrent OCR workers (default: CPU cores - 1)
             extract_links: Render hyperlink annotations as ``[text](url)`` in
                 markdown output (default: True). Set False for plain anchor text.
+            image_output_dir: Directory where extracted embedded images are
+                written. Requires ``extract_images=True`` and returns file
+                names/paths in each ``ExtractedImage``.
+            extract_images: Extract embedded image bytes and metadata. Defaults
+                to False. This is the only option that enables extraction;
+                ``image_mode`` controls Markdown presentation independently.
+            extract_annotations: Include all PDF annotations as page-scoped
+                structured data (default: False).
+            extract_form_fields: Include AcroForm widget fields and values as
+                page-scoped structured data (default: False).
+            extract_structure_tree: Include the tagged-PDF logical structure
+                tree as page-scoped structured data (default: False).
             ocr_failure_fatal: Whether a systemic OCR failure (every OCR task
                 failed and at least one was a text-sparse page) aborts the whole
                 parse (default: True). Set False to keep already-recovered native
@@ -186,6 +428,9 @@ class LiteParse:
                 (``TextItem.words``). Default False. Word boxes roughly double
                 the text-item payload, so enable only for word-level bbox
                 attribution.
+            extract_text_metadata: Include rich PDF text metadata on returned
+                text items (MCID, glyph width, font metrics/weight/buggy state,
+                colors, raw character codes, and ``trailing_space_generated``). Default False.
             crop_box: Restrict output to a page sub-region, as a
                 ``(top, right, bottom, left)`` tuple where each value is the
                 fraction cropped from that side (top-left origin, each in
@@ -200,6 +445,8 @@ class LiteParse:
                 ``ParsedPage.complexity`` (the same :meth:`is_complex` returns).
                 Default False; enabling it runs an extra vector-text detection
                 pass.
+            extract_vector_graphics: Expose page-scoped vector shapes and
+                merged horizontal/vertical line segments. Default False.
         """
         kwargs = {}
         if ocr_enabled is not None:
@@ -230,20 +477,42 @@ class LiteParse:
             kwargs["num_workers"] = num_workers
         if image_mode is not None:
             kwargs["image_mode"] = image_mode
+        if extract_images is not None:
+            kwargs["extract_images"] = extract_images
+        if image_output_dir is not None:
+            kwargs["image_output_dir"] = str(image_output_dir)
         if extract_links is not None:
             kwargs["extract_links"] = extract_links
+        if extract_annotations is not None:
+            kwargs["extract_annotations"] = extract_annotations
+        if extract_form_fields is not None:
+            kwargs["extract_form_fields"] = extract_form_fields
+        if extract_structure_tree is not None:
+            kwargs["extract_structure_tree"] = extract_structure_tree
+        if extract_xfa_packets is not None:
+            kwargs["extract_xfa_packets"] = extract_xfa_packets
+        if extract_content_bounds is not None:
+            kwargs["extract_content_bounds"] = extract_content_bounds
+        if detect_screenshot_rects is not None:
+            kwargs["detect_screenshot_rects"] = detect_screenshot_rects
+        if render_form_fields is not None:
+            kwargs["render_form_fields"] = render_form_fields
         if ocr_failure_fatal is not None:
             kwargs["ocr_failure_fatal"] = ocr_failure_fatal
         if ocr_hedge_delays_ms is not None:
             kwargs["ocr_hedge_delays_ms"] = ocr_hedge_delays_ms
         if emit_word_boxes is not None:
             kwargs["emit_word_boxes"] = emit_word_boxes
+        if extract_text_metadata is not None:
+            kwargs["extract_text_metadata"] = extract_text_metadata
         if crop_box is not None:
             kwargs["crop_box"] = crop_box
         if skip_diagonal_text is not None:
             kwargs["skip_diagonal_text"] = skip_diagonal_text
         if include_complexity is not None:
             kwargs["include_complexity"] = include_complexity
+        if extract_vector_graphics is not None:
+            kwargs["extract_vector_graphics"] = extract_vector_graphics
 
         self._native = _NativeLiteParse(**kwargs)
 
@@ -353,6 +622,18 @@ class LiteParse:
                     width=r.width,
                     height=r.height,
                     image_bytes=r.image_bytes,
+                    is_solid_fill=getattr(r, "is_solid_fill", False),
+                    rects=[
+                        ScreenshotRect(
+                            x=rect.x,
+                            y=rect.y,
+                            width=rect.width,
+                            height=rect.height,
+                            color=rect.color,
+                            is_line=rect.is_line,
+                        )
+                        for rect in getattr(r, "rects", [])
+                    ],
                 )
                 for r in native_results
             ]
@@ -377,13 +658,23 @@ class LiteParse:
             quiet=cfg.quiet,
             num_workers=cfg.num_workers,
             image_mode=cfg.image_mode,
+            image_output_dir=cfg.image_output_dir,
             extract_links=cfg.extract_links,
+            extract_annotations=cfg.extract_annotations,
+            extract_form_fields=cfg.extract_form_fields,
+            extract_structure_tree=cfg.extract_structure_tree,
             ocr_failure_fatal=cfg.ocr_failure_fatal,
             ocr_hedge_delays_ms=list(cfg.ocr_hedge_delays_ms),
             emit_word_boxes=cfg.emit_word_boxes,
             crop_box=cfg.crop_box,
             skip_diagonal_text=cfg.skip_diagonal_text,
             include_complexity=cfg.include_complexity,
+            extract_text_metadata=cfg.extract_text_metadata,
+            extract_images=cfg.extract_images,
+            extract_vector_graphics=cfg.extract_vector_graphics,
+            extract_xfa_packets=cfg.extract_xfa_packets,
+            extract_content_bounds=cfg.extract_content_bounds,
+            detect_screenshot_rects=cfg.detect_screenshot_rects,
         )
 
     def __repr__(self) -> str:

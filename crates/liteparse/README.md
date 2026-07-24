@@ -56,7 +56,10 @@ let config = LiteParseConfig {
     target_pages: Some("1-5,10".into()),  // Specific pages (optional)
     dpi: 150.0,                           // Rendering DPI
     output_format: OutputFormat::Json,    // Json | Text | Markdown
+    extract_annotations: false,           // Include page annotations in output
+    extract_structure_tree: false,        // Include tagged-PDF logical structure
     preserve_very_small_text: false,      // Keep tiny text
+    extract_text_metadata: false,         // Opt in to rich PDF text metadata
     password: None,                       // Password for protected documents
     quiet: false,                         // Suppress progress output
     ..Default::default()
@@ -64,6 +67,17 @@ let config = LiteParseConfig {
 
 let parser = LiteParse::new(config);
 ```
+
+Set `extract_annotations: true` to populate `ParsedPage::annotations` with
+annotation subtype, contents, author/title, PDF date strings, viewport-space
+rectangle and quadpoint rectangles, and external link URI. It is independent
+of `extract_links`, which controls Markdown link rendering. The field is
+`None` when extraction is disabled.
+
+Set `extract_structure_tree: true` to populate `ParsedPage::structure_tree` with
+the complete tagged-PDF hierarchy: all roots, element type/ID, actual and alternate
+text, title, typed scalar attributes, MCIDs, recursive children, and referenced link
+annotations. Disabled pages use `None`; enabled untagged pages have no roots.
 
 ## Markdown Output
 
@@ -74,6 +88,11 @@ images, and links reconstructed from the spatial layout. Set
 
 - `image_mode` (`ImageMode::Placeholder` default | `Off` | `Embed`) — how raster
   images are surfaced in the output.
+- `extract_images` (default `false`) — return embedded image bytes and metadata
+  without changing Markdown image handling. This is the only option that enables
+  extraction.
+- `image_output_dir` — write extracted image files and return their names/paths;
+  requires `extract_images: true`. Duplicate image resources reuse the same file.
 - `extract_links` (default `true`) — render hyperlink annotations as
   `[text](url)`; set `false` for plain anchor text.
 
@@ -83,6 +102,8 @@ use liteparse::config::{ImageMode, LiteParseConfig, OutputFormat};
 let config = LiteParseConfig {
     output_format: OutputFormat::Markdown,
     image_mode: ImageMode::Placeholder,
+    extract_images: true,
+    image_output_dir: Some("./images".into()),
     extract_links: true,
     ..Default::default()
 };

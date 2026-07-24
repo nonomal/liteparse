@@ -159,6 +159,18 @@ lit parse document.pdf --target-pages "1-5,10,15-20"
 # Parse without OCR
 lit parse document.pdf --no-ocr
 
+# Include page-scoped vector path data in JSON
+lit parse document.pdf --format json --extract-vector-graphics
+
+# Include rich per-item PDF text metadata
+lit parse document.pdf --format json --extract-text-metadata
+
+# Include page annotations in structured JSON
+lit parse document.pdf --format json --extract-annotations
+
+# Include AcroForm widget fields and values (repairs orphaned widgets in memory)
+lit parse document.pdf --format json --extract-form-fields
+
 # Parse a remote PDF
 curl -sL https://example.com/report.pdf | lit parse -
 ```
@@ -178,24 +190,90 @@ lit parse document.pdf --format markdown -o output.md
 lit parse document.pdf --format markdown --image-mode off
 
 # Extract embedded images to disk and reference them from the markdown
-lit parse document.pdf --format markdown --image-mode embed --image-output-dir ./images
+lit parse document.pdf --format markdown --image-mode embed --extract-images --image-output-dir ./images
+
+# Extract image bytes and metadata without changing Markdown image handling
+lit parse document.pdf --format json --extract-images
 
 # Emit link text as plain text (no [text](url) syntax)
 lit parse document.pdf --format markdown --no-links
+
+# Include tagged-PDF logical structure in JSON
+lit parse document.pdf --format json --extract-structure-tree
 ```
 
 Image handling is controlled by `--image-mode`:
 
 | Mode | Behavior |
 |------|----------|
-| `placeholder` (default) | Emits `![](image_pN_K.png)` references in reading order |
+| `placeholder` (default) | Emits `![](img_pN_K.png)` references in reading order |
 | `off` | Strips images entirely |
-| `embed` | Writes each image's PNG bytes to `--image-output-dir` and references them |
+| `embed` | Emits the same image references as `placeholder` |
+
+`--extract-images` is the only option that enables embedded-image extraction.
+`--image-output-dir` requires it and writes the extracted bytes to disk. JSON output
+contains each image's `name`, `path`, page bbox, intrinsic pixel dimensions, rotation,
+format, and duplicate relationship; pixel bytes are never embedded in JSON. Identical
+image resources reuse the same output file.
+
+Library callers can opt in with `extract_images: true` (Rust), `extractImages: true`
+(Node/WASM), or `extract_images=True` (Python). It defaults to false. Markdown image
+mode controls presentation only; placeholder refs are still discovered without bytes.
 
 > Markdown reconstruction quality varies with document complexity. For the
 > hardest documents (dense tables, multi-column layouts, scans),
 > [LlamaParse](https://developers.llamaindex.ai/python/cloud/llamaparse/?utm_source=github&utm_medium=liteparse)
 > remains the most accurate option.
+
+### Vector Graphics
+
+Vector path output is opt-in because path-heavy PDFs can produce large payloads.
+Enable it with `--extract-vector-graphics`, Rust/Python
+`extract_vector_graphics = true`, or JavaScript/WASM
+`extractVectorGraphics: true`. Each page then includes `vector_graphics`
+(`vectorGraphics` in JavaScript) with:
+
+- `shapes`: path bounding box, stroke/fill paint state and ARGB colors, and
+  whether the path contains a Bezier curve.
+- `lines`: compatible horizontal/vertical segments merged using stroke width
+  and paint colors, with top-left 72-DPI viewport coordinates.
+
+The representation follows LlamaParse PDFium path extraction; LiteParse calls
+the shape rectangle `bbox` rather than PDFium's `coords`, and uses `width` /
+`height` rather than `w` / `h`. The field is absent (or `None`/`undefined`) by
+default. Diagonal and curved segments are represented by their parent shape but
+are not emitted as lines.
+
+### Tagged PDF structure tree
+
+Enable `--extract-structure-tree` (Rust/Python `extract_structure_tree`,
+JavaScript/WASM `extractStructureTree`) to add a page-scoped `structure_tree`.
+It preserves every root and recursively exposes element type, ID, actual/alternate
+text, title, typed scalar attributes, marked-content IDs, children, and referenced
+link annotations. The field is absent by default; enabled untagged pages contain
+`roots: []`.
+
+### Document metadata, content bounds, and XFA packets
+
+Parse results (Rust/Node/Python APIs) carry the document's `/Info` `creator`
+and `producer` entries when present; these are API-only and never appear in
+CLI JSON output. Enable `--extract-content-bounds` (Rust/Python
+`extract_content_bounds`, JavaScript/WASM `extractContentBounds`) to add a
+per-page `content_bounds`: the union bbox of the page's top-level content
+objects in viewport coords (absent for empty pages). Enable
+`--extract-xfa-packets` (Rust/Python `extract_xfa_packets`, JavaScript/WASM
+`extractXfaPackets`) to add `xfa_packets` with each raw XFA packet's index,
+name, byte length, and XML content; non-XFA documents yield an empty list.
+All of these are off by default, so default JSON output is unchanged.
+
+### Screenshot raster signals
+
+Screenshots draw AcroForm field appearances (filled values, checkbox states)
+on top of the page raster, so form data is visible in the render and to OCR.
+Each screenshot result reports `is_solid_fill` (blank page after render), and
+with `detect_screenshot_rects` (Node `detectScreenshotRects`) also `rects`:
+solid same-color rectangles and lines found in the raster in viewport coords,
+which covers scanned/flattened pages that carry no vector paths.
 
 ### Check Complexity
 
@@ -260,8 +338,13 @@ Options:
       --target-pages <pages>   Pages to parse (e.g., "1-5,10,15-20")
       --dpi <dpi>              Rendering DPI [default: 150]
       --image-mode <mode>      Markdown image handling: off|placeholder|embed [default: placeholder]
-      --image-output-dir <dir> Where to write images when --image-mode embed
+      --extract-images         Extract embedded image bytes and metadata
+      --image-output-dir <dir> Write extracted images; requires --extract-images
+      --extract-text-metadata  Include rich PDF text metadata in text items
+      --extract-vector-graphics Include page vector shapes and merged H/V lines
       --no-links               Emit link anchor text as plain text (no [text](url)) in markdown
+      --extract-annotations    Include PDF annotations in page output
+      --extract-form-fields    Include AcroForm widget fields and values
       --preserve-small-text    Keep very small text
       --password <password>    Password for encrypted documents
       --num-workers <n>        Concurrent OCR workers [default: CPU cores - 1]

@@ -33,16 +33,21 @@ pub(crate) fn page(lines: Vec<ProjectedLine>) -> ParsedPage {
         page_number: 1,
         page_width: 612.0,
         page_height: 792.0,
+        content_bounds: None,
         text: String::new(),
         markdown: String::new(),
         text_items: vec![],
         projected_lines: lines,
         regions: crate::types::Region::default(),
         graphics: vec![],
+        vector_graphics: None,
         figures: vec![],
         struct_nodes: vec![],
         image_refs: vec![],
         complexity: None,
+        annotations: None,
+        form_fields: None,
+        structure_tree: None,
     }
 }
 
@@ -184,16 +189,21 @@ pub(crate) fn header_footer_page(n: usize, header: &str, footer: &str, body: &st
         page_number: n,
         page_width: 612.0,
         page_height: 100.0,
+        content_bounds: None,
         text: String::new(),
         markdown: String::new(),
         text_items: vec![],
         projected_lines: lines,
         regions: crate::types::Region::default(),
         graphics: vec![],
+        vector_graphics: None,
         figures: vec![],
         struct_nodes: vec![],
         image_refs: vec![],
         complexity: None,
+        annotations: None,
+        form_fields: None,
+        structure_tree: None,
     }
 }
 

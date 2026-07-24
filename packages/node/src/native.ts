@@ -30,7 +30,16 @@ export interface LiteParseNativeConfig {
   dpi?: number;
   outputFormat?: string;
   imageMode?: string;
+  extractImages?: boolean;
+  imageOutputDir?: string;
   extractLinks?: boolean;
+  extractAnnotations?: boolean;
+  extractFormFields?: boolean;
+  extractStructureTree?: boolean;
+  extractXfaPackets?: boolean;
+  extractContentBounds?: boolean;
+  detectScreenshotRects?: boolean;
+  renderFormFields?: boolean;
   preserveVerySmallText?: boolean;
   password?: string;
   quiet?: boolean;
@@ -38,9 +47,11 @@ export interface LiteParseNativeConfig {
   ocrFailureFatal?: boolean;
   ocrHedgeDelaysMs?: number[];
   emitWordBoxes?: boolean;
+  extractTextMetadata?: boolean;
   cropBox?: NativeCropBox;
   skipDiagonalText?: boolean;
   includeComplexity?: boolean;
+  extractVectorGraphics?: boolean;
 }
 
 export interface NativeCropBox {
@@ -66,6 +77,17 @@ export interface NativeTextItem {
   height: number;
   fontName?: string;
   fontSize?: number;
+  fontHeight?: number;
+  fontAscent?: number;
+  fontDescent?: number;
+  fontWeight?: number;
+  textWidth?: number;
+  fontIsBuggy?: boolean;
+  mcid?: number;
+  fillColor?: string;
+  strokeColor?: string;
+  charCodes?: number[];
+  trailingSpaceGenerated?: boolean;
   confidence?: number;
   rotation?: number;
   words?: NativeWordBox[];
@@ -96,20 +118,116 @@ export interface NativePageInput {
   graphics?: NativeGraphic[];
 }
 
+export interface NativeRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface NativeParsedPage {
   pageNum: number;
   width: number;
   height: number;
+  contentBounds?: NativeRect;
   text: string;
   markdown: string;
   textItems: NativeTextItem[];
   complexity?: NativePageComplexityStats;
+  vectorGraphics?: NativeVectorGraphics;
+  annotations?: NativeDocumentAnnotation[];
+  formFields?: NativeFormField[];
+  structureTree?: NativeStructureTree;
+}
+
+export interface NativeStructureAttribute {
+  name: string;
+  booleanValue?: boolean;
+  numberValue?: number;
+  stringValue?: string;
+}
+
+export interface NativeStructureTree {
+  roots: NativeStructureTreeElement[];
+}
+
+export interface NativeStructureTreeElement {
+  elementType: string;
+  id?: string;
+  actualText?: string;
+  altText?: string;
+  title?: string;
+  attributes: NativeStructureAttribute[];
+  markedContentIds: number[];
+  children: NativeStructureTreeElement[];
+  annotations: NativeDocumentAnnotation[];
+}
+
+export interface NativeVectorGraphics {
+  shapes: Array<{
+    bbox: { x: number; y: number; width: number; height: number };
+    stroke: boolean;
+    strokeColor?: string;
+    fill: boolean;
+    fillColor?: string;
+    hasCurve: boolean;
+  }>;
+  lines: Array<{
+    x1: number; y1: number; x2: number; y2: number;
+    stroke: boolean; strokeWidth?: number; strokeColor?: string;
+    fill: boolean; fillColor?: string;
+  }>;
+}
+
+export interface NativeAnnotationRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface NativeDocumentAnnotation {
+  subtype: string;
+  contents?: string;
+  created?: string;
+  modified?: string;
+  title?: string;
+  rect?: NativeAnnotationRect;
+  quadpointRects: NativeAnnotationRect[];
+  uri?: string;
+}
+
+export interface NativeFormField {
+  id: string;
+  fieldType: string;
+  page: number;
+  annotationIndex: number;
+  widgetIndex: number;
+  objectNumber?: number;
+  name?: string;
+  alternateName?: string;
+  value?: string;
+  exportValue?: string;
+  fieldFlags: number;
+  controlCount?: number;
+  controlIndex?: number;
+  checked?: boolean;
+  rect?: NativeAnnotationRect;
+  options: string[];
+  selectedOptions: string[];
 }
 
 export interface NativeExtractedImage {
   id: string;
+  name: string;
+  path?: string;
   page: number;
+  bbox: { x: number; y: number; width: number; height: number };
+  width: number;
+  height: number;
+  rotation: number;
   format: string;
+  duplicateOf?: string;
   bytes: Buffer;
 }
 
@@ -117,6 +235,18 @@ export interface NativeParseResult {
   pages: NativeParsedPage[];
   text: string;
   images: NativeExtractedImage[];
+  imageErrorCount: number;
+  formType?: number;
+  creator?: string;
+  producer?: string;
+  xfaPackets?: NativeXfaPacket[];
+}
+
+export interface NativeXfaPacket {
+  index: number;
+  name?: string;
+  contentLength: number;
+  content?: string;
 }
 
 export interface NativeScreenshotResult {
@@ -124,6 +254,17 @@ export interface NativeScreenshotResult {
   width: number;
   height: number;
   imageBuffer: Buffer;
+  isSolidFill: boolean;
+  rects: NativeScreenshotRect[];
+}
+
+export interface NativeScreenshotRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+  isLine: boolean;
 }
 
 export interface NativeLayoutComplexityStats {

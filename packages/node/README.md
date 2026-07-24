@@ -58,13 +58,55 @@ const parser = new LiteParse({
   dpi: 150,                      // Rendering DPI
   outputFormat: 'json',          // "json" | "text" | "markdown"
   imageMode: 'placeholder',      // Markdown image handling: "placeholder" | "off" | "embed"
+  extractImages: true,           // Extract image bytes + metadata (default: false)
+  imageOutputDir: './images',    // Write images and return name/path metadata (optional)
   extractLinks: true,            // Render [text](url) links in markdown output
+  extractVectorGraphics: false,  // Opt-in shapes + merged H/V lines per page
+  extractAnnotations: false,     // Include page annotations in structured output
+  extractFormFields: false,      // Include AcroForm widget fields and values
+  extractStructureTree: false,   // Include tagged-PDF logical structure
+  extractXfaPackets: false,      // Include raw XFA packets (name + XML content)
+  extractContentBounds: false,   // Include per-page contentBounds union bbox
+  detectScreenshotRects: false,  // Detect solid rects/lines in screenshots
   preserveVerySmallText: false,  // Keep tiny text
+  extractTextMetadata: false,    // Opt in to MCID, font metrics, colors, char codes, and trailingSpaceGenerated
   password: undefined,           // Password for protected documents
   quiet: false,                  // Suppress progress output
   numWorkers: 4,                 // Concurrent OCR workers
 });
 ```
+
+When `extractImages` is true, image extraction is enabled. `imageOutputDir` requires
+that explicit opt-in and writes the extracted bytes to disk. Each
+`result.images` entry includes its page bbox, intrinsic pixel dimensions, rotation,
+format, `name`, and `path`. Valid source JPEGs are preserved, exact duplicates reuse
+one file, and JSON CLI output contains metadata only (no base64 image data).
+`imageMode` controls Markdown presentation only and does not imply extraction. With
+`extractImages: false`, lightweight Markdown placement refs are still collected and
+`result.images` stays empty.
+
+The Node CLI uses the same snake_case JSON schema as the Rust CLI; camelCase is
+reserved for the programmatic Node API.
+
+When `extractAnnotations` is enabled, each parsed page has an `annotations`
+array containing the subtype, contents, author/title, PDF date strings,
+viewport-space rectangle and quadpoint rectangles, and URI for external link
+annotations. It is independent of `extractLinks`, which controls Markdown link
+rendering. The field is omitted when extraction is disabled.
+
+When `extractStructureTree` is enabled, each page has a `structureTree` containing
+all tagged-PDF roots and recursive elements with type, ID, actual/alternate text,
+title, typed attributes, MCIDs, children, and referenced link annotations. Untagged
+pages have an empty `roots` array; the field is omitted when disabled.
+
+Every result also carries the document's `/Info` `creator`/`producer` when
+present (API-level only, not in CLI JSON), and with `extractContentBounds`
+each page carries a `contentBounds` union bbox of its top-level content
+objects. With `extractXfaPackets`, `result.xfaPackets` lists each raw XFA
+packet (index, name, content length, XML content); non-XFA documents yield an
+empty array. Screenshots draw form-field appearances into the raster and
+report `isSolidFill` per page, plus detected solid `rects` when
+`detectScreenshotRects` is enabled.
 
 ## Parsing from Bytes
 
@@ -133,6 +175,8 @@ The npm package includes the `lit` CLI:
 ```bash
 lit parse document.pdf
 lit parse document.pdf --format json -o output.json
+lit parse document.pdf --format json --extract-annotations
+lit parse document.pdf --format json --extract-form-fields
 lit screenshot document.pdf -o ./screenshots
 lit batch-parse ./input ./output
 lit is-complex document.pdf

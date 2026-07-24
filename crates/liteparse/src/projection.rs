@@ -2894,6 +2894,7 @@ pub fn project_pages_to_grid(pages: Vec<Page>) -> Vec<ParsedPage> {
                 page_number: page.page_number,
                 page_width: page.page_width,
                 page_height: page.page_height,
+                content_bounds: page.content_bounds,
                 text,
                 markdown: String::new(),
                 text_items: projected_items
@@ -2910,10 +2911,14 @@ pub fn project_pages_to_grid(pages: Vec<Page>) -> Vec<ParsedPage> {
                 projected_lines,
                 regions,
                 graphics: page.graphics,
+                vector_graphics: page.vector_graphics,
                 figures,
                 struct_nodes: page.struct_nodes,
                 image_refs: page.image_refs,
                 complexity: None,
+                annotations: page.annotations,
+                form_fields: page.form_fields,
+                structure_tree: page.structure_tree,
             }
         })
         .collect()
@@ -5000,10 +5005,15 @@ mod tests {
             page_number: 1,
             page_width: 612.0,
             page_height: 792.0,
+            content_bounds: None,
             graphics: Vec::new(),
+            vector_graphics: None,
             text_items: Vec::new(),
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
         };
         let projection_boxes = vec![
             projected_item("", 10.0, 0.0, 10.0),
@@ -5301,10 +5311,15 @@ mod tests {
             page_number: 1,
             page_width: 612.0,
             page_height: 792.0,
+            content_bounds: None,
             text_items: Vec::new(),
             graphics: Vec::new(),
+            vector_graphics: None,
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
         }];
 
         let parsed = project_pages_to_grid(pages);
@@ -5321,6 +5336,7 @@ mod tests {
             page_number: 1,
             page_width: 612.0,
             page_height: 792.0,
+            content_bounds: None,
             text_items: vec![
                 TextItem {
                     text: "A".to_string(),
@@ -5340,8 +5356,12 @@ mod tests {
                 },
             ],
             graphics: Vec::new(),
+            vector_graphics: None,
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
         }];
 
         let parsed = project_pages_to_grid(pages);
@@ -5367,6 +5387,7 @@ mod tests {
             page_number: 1,
             page_width: 612.0,
             page_height: 792.0,
+            content_bounds: None,
             text_items: vec![
                 TextItem {
                     text: "A".to_string(),
@@ -5400,8 +5421,12 @@ mod tests {
                 },
             ],
             graphics: Vec::new(),
+            vector_graphics: None,
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
         }];
 
         let parsed = project_pages_to_grid(pages);
@@ -5421,6 +5446,7 @@ mod tests {
             page_number: 1,
             page_width: 612.0,
             page_height: 792.0,
+            content_bounds: None,
             text_items: vec![
                 TextItem {
                     text: "ab".to_string(),
@@ -5440,8 +5466,12 @@ mod tests {
                 },
             ],
             graphics: Vec::new(),
+            vector_graphics: None,
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
         }];
 
         let parsed = project_pages_to_grid(pages);

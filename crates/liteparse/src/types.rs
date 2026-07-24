@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[doc(hidden)]
 #[derive(Debug, Clone)]
@@ -55,6 +55,15 @@ pub struct TextItem {
     /// Stroke color as ARGB hex string.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stroke_color: Option<String>,
+    /// Raw character codes from the PDF content stream. These correspond to
+    /// source glyphs rather than Unicode scalar values, so ligature expansion
+    /// can produce more text characters than entries in this array.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub char_codes: Vec<u32>,
+    /// Whether the trailing source space was synthesized by PDFium rather than
+    /// represented by a real space glyph in the PDF content stream.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub trailing_space_generated: bool,
     /// OCR confidence score (0.0–1.0). None for native PDF text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
@@ -78,6 +87,65 @@ pub struct TextItem {
     pub words: Vec<WordBox>,
 }
 
+/// The `TextItem` fields governed by `extract_text_metadata`, pre-gated by
+/// [`TextItem::text_metadata`]. This struct defines which fields count as
+/// rich text metadata: every output surface (CLI JSON, napi, python, wasm)
+/// builds its public items from it, so a new metadata field added here is a
+/// compile error in each surface until it is wired through.
+///
+/// All fields are `Option`/slice so "extraction disabled" is representable
+/// even for the plain-`bool` fields on `TextItem`: `None`/empty means the
+/// caller did not opt in and the field must be omitted from output.
+pub struct TextMetadata<'a> {
+    pub font_height: Option<f32>,
+    pub font_ascent: Option<f32>,
+    pub font_descent: Option<f32>,
+    pub font_weight: Option<i32>,
+    pub text_width: Option<f32>,
+    pub font_is_buggy: Option<bool>,
+    pub mcid: Option<i32>,
+    pub fill_color: Option<&'a str>,
+    pub stroke_color: Option<&'a str>,
+    pub char_codes: Option<&'a [u32]>,
+    pub trailing_space_generated: Option<bool>,
+}
+
+impl TextItem {
+    /// The rich-metadata view of this item: real values when `enabled`, all
+    /// absent otherwise. See [`TextMetadata`].
+    pub fn text_metadata(&self, enabled: bool) -> TextMetadata<'_> {
+        if enabled {
+            TextMetadata {
+                font_height: self.font_height,
+                font_ascent: self.font_ascent,
+                font_descent: self.font_descent,
+                font_weight: self.font_weight,
+                text_width: self.text_width,
+                font_is_buggy: Some(self.font_is_buggy),
+                mcid: self.mcid,
+                fill_color: self.fill_color.as_deref(),
+                stroke_color: self.stroke_color.as_deref(),
+                char_codes: Some(&self.char_codes),
+                trailing_space_generated: Some(self.trailing_space_generated),
+            }
+        } else {
+            TextMetadata {
+                font_height: None,
+                font_ascent: None,
+                font_descent: None,
+                font_weight: None,
+                text_width: None,
+                font_is_buggy: None,
+                mcid: None,
+                fill_color: None,
+                stroke_color: None,
+                char_codes: None,
+                trailing_space_generated: None,
+            }
+        }
+    }
+}
+
 /// One word's bounding box within a `TextItem`, in the same viewport space
 /// (top-left origin, 72 DPI) as the parent item. `text` is the word's content
 /// with inter-word spaces excluded.
@@ -96,11 +164,19 @@ pub struct Page {
     pub page_number: usize,
     pub page_width: f32,
     pub page_height: f32,
+    /// Union bbox of the page's top-level content objects in viewport
+    /// coords (visible content extent). `None` for empty pages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_bounds: Option<Rect>,
     pub text_items: Vec<TextItem>,
     /// Vector graphics on the page, distilled from PDFium path objects.
     /// Not emitted in JSON/text outputs — consumed by the markdown layout pass.
     #[serde(skip)]
     pub graphics: Vec<GraphicPrimitive>,
+    /// Lossless-enough, PDFium-compatible path output requested by the caller.
+    /// Kept separate from the lossy internal `graphics` layout primitives.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_graphics: Option<VectorGraphics>,
     /// Structure-tree nodes for this page when the PDF is tagged. Each node
     /// carries its role, marked-content ids, and the union bbox of its tagged
     /// content. Empty for untagged PDFs.
@@ -110,6 +186,141 @@ pub struct Page {
     /// images. Threaded through to `ParsedPage.image_refs`.
     #[serde(skip)]
     pub image_refs: Vec<ImageRef>,
+    /// Public annotation data when explicitly requested. `None` distinguishes
+    /// disabled extraction from an enabled page with no annotations.
+    #[serde(skip)]
+    pub annotations: Option<Vec<DocumentAnnotation>>,
+    /// AcroForm widgets when explicitly requested.
+    #[serde(skip)]
+    pub form_fields: Option<Vec<FormField>>,
+    /// Tagged-PDF logical structure when explicitly requested.
+    #[serde(skip)]
+    pub structure_tree: Option<StructureTree>,
+}
+
+/// One PDF page annotation. Coordinates use the same top-left, 72-DPI
+/// viewport space as [`TextItem`].
+#[derive(Debug, Clone, Serialize)]
+pub struct DocumentAnnotation {
+    pub subtype: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contents: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rect: Option<Rect>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub quadpoint_rects: Vec<Rect>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+}
+
+/// Scalar value from a tagged-PDF structure element's `/A` dictionary.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(untagged)]
+pub enum StructureAttributeValue {
+    Boolean(bool),
+    Number(f32),
+    String(String),
+}
+
+/// A complete page-scoped tagged-PDF logical structure tree.
+#[derive(Debug, Clone, Serialize)]
+pub struct StructureTree {
+    pub roots: Vec<StructureTreeElement>,
+}
+
+/// One tagged-PDF structure element. Field names follow the
+/// repository's snake_case JSON convention rather than PDFium's C spellings.
+#[derive(Debug, Clone, Serialize)]
+pub struct StructureTreeElement {
+    #[serde(rename = "type")]
+    pub element_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alt_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub attributes: BTreeMap<String, StructureAttributeValue>,
+    pub marked_content_ids: Vec<i32>,
+    pub children: Vec<StructureTreeElement>,
+    pub annotations: Vec<DocumentAnnotation>,
+}
+
+/// One AcroForm widget and its resolved field metadata.
+#[derive(Debug, Clone, Serialize)]
+pub struct FormField {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub field_type: String,
+    pub page: u32,
+    pub annotation_index: i32,
+    pub widget_index: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub object_number: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alternate_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub export_value: Option<String>,
+    pub field_flags: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_count: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_index: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checked: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rect: Option<Rect>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub selected_options: Vec<String>,
+}
+
+/// One raw packet from an XFA form document's `/XFA` array. Surfaced on
+/// `ParseResult.xfa_packets` when `extract_xfa_packets` is enabled.
+#[derive(Debug, Clone, Serialize)]
+pub struct XfaPacket {
+    /// Zero-based index in the XFA array.
+    pub index: u32,
+    /// Packet name (e.g. `template`, `datasets`), when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Decoded content length in bytes.
+    pub content_length: u32,
+    /// Packet content (usually XML), lossily decoded as UTF-8. `None` when
+    /// the packet stream could not be read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+}
+
+/// One solid rectangle (or thick line) detected in a rendered page bitmap.
+/// Coordinates are in the same top-left, 72-DPI viewport space as text
+/// items. Detection runs on the raster, so it also covers scanned/flattened
+/// pages that carry no vector paths.
+#[derive(Debug, Clone, Serialize)]
+pub struct ScreenshotRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    /// Fill color as ARGB hex string (e.g. "ff1a2b3c").
+    pub color: String,
+    /// True when only one dimension reaches the minimum rectangle size
+    /// (a solid line rather than a filled area).
+    pub is_line: bool,
 }
 
 /// One entry in the document outline (bookmarks). Coordinates are in PDF
@@ -147,6 +358,10 @@ pub struct ParsedPage {
     pub page_number: usize,
     pub page_width: f32,
     pub page_height: f32,
+    /// Union bbox of the page's top-level content objects in viewport
+    /// coords (visible content extent). `None` for empty pages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_bounds: Option<Rect>,
     pub text: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub markdown: String,
@@ -164,6 +379,9 @@ pub struct ParsedPage {
     /// the JSON/text output.
     #[serde(skip)]
     pub graphics: Vec<GraphicPrimitive>,
+    /// Public vector path extraction. Absent unless explicitly enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_graphics: Option<VectorGraphics>,
     /// Figure-region bounding rectangles derived from `graphics`. Pre-computed
     /// in `to_parsed_pages` so the XY-cut layout pass can treat them as
     /// obstacles, and reused downstream for figure classification.
@@ -180,10 +398,26 @@ pub struct ParsedPage {
     /// page has no embedded images. Not part of JSON/text output.
     #[serde(skip)]
     pub image_refs: Vec<ImageRef>,
+    /// Per-page complexity signals (the same the `is_complex` API returns).
+    /// Populated only when `LiteParseConfig::include_complexity` is set;
+    /// `None` otherwise. Surfaced as a per-page `complexity` object in JSON.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complexity: Option<crate::ocr_merge::PageComplexityStats>,
+    /// Page annotations when `LiteParseConfig::extract_annotations` is true.
+    /// `None` means extraction was disabled; `Some([])` means enabled with no
+    /// annotations on this page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<Vec<DocumentAnnotation>>,
+    /// AcroForm widgets when `extract_form_fields` is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub form_fields: Option<Vec<FormField>>,
+    /// Tagged-PDF logical structure when `extract_structure_tree` is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub structure_tree: Option<StructureTree>,
 }
 
 /// One embedded raster image on a page. `id` is a stable, page-scoped slug
-/// used as the markdown link target (e.g. `image_p1_0.png`). `obj_index` is
+/// used as the markdown link target (e.g. `img_p1_1.png`). `obj_index` is
 /// the image's position among image page-objects, so a later embed pass can
 /// re-open the document and pull pixel bytes with `render_image_object`.
 #[doc(hidden)]
@@ -192,22 +426,40 @@ pub struct ImageRef {
     pub id: String,
     pub bbox: Rect,
     pub obj_index: usize,
+    pub format: String,
+    pub pixel_width: u32,
+    pub pixel_height: u32,
+    pub rotation: f32,
+    pub jpeg_bytes: Option<Vec<u8>>,
+    pub raw_bytes: Option<Vec<u8>>,
+    pub bits_per_pixel: u32,
+    pub colorspace: i32,
 }
 
 /// A raster image extracted from a page along with its pixel bytes. Surfaced
-/// on `ParseResult.images` only when `ImageMode::Embed` is configured —
-/// otherwise the extraction step skips the render and only `ImageRef`s are
-/// produced. `format` is currently always `"png"` (encoded from the
-/// FPDFImageObj_GetRenderedBitmap output via the same path used for page
-/// screenshots).
+/// on `ParseResult.images` only when `extract_images` is enabled; otherwise
+/// the extraction step skips the render and only `ImageRef`s are
+/// produced. JPEG streams are preserved without re-encoding when PDFium
+/// exposes a valid directly decoded DCT stream; other images are encoded as
+/// PNG from PDFium's rendered bitmap.
 #[derive(Debug, Clone, Serialize)]
 pub struct ExtractedImage {
     pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     pub page: u32,
     pub bbox: Rect,
+    pub width: u32,
+    pub height: u32,
+    pub rotation: f32,
     pub format: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duplicate_of: Option<String>,
+    /// Encoded image bytes. Shared (`Arc`) so duplicate entries reference the
+    /// canonical image's buffer instead of copying it per occurrence.
     #[serde(skip)]
-    pub bytes: Vec<u8>,
+    pub bytes: std::sync::Arc<Vec<u8>>,
 }
 
 #[doc(hidden)]
@@ -217,6 +469,45 @@ pub struct Rect {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+}
+
+/// Page-scoped vector path output. Coordinates use the same top-left,
+/// 72-DPI viewport space as text items.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct VectorGraphics {
+    pub shapes: Vec<VectorShape>,
+    pub lines: Vec<VectorLine>,
+}
+
+/// One PDF path object's paint state and viewport bounding box.
+#[derive(Debug, Clone, Serialize)]
+pub struct VectorShape {
+    pub bbox: Rect,
+    pub stroke: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stroke_color: Option<String>,
+    pub fill: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_color: Option<String>,
+    pub has_curve: bool,
+}
+
+/// A strict horizontal or vertical path segment after adjacent compatible
+/// segments have been merged, matching LlamaParse PDFium path semantics.
+#[derive(Debug, Clone, Serialize)]
+pub struct VectorLine {
+    pub x1: f32,
+    pub y1: f32,
+    pub x2: f32,
+    pub y2: f32,
+    pub stroke: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stroke_width: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stroke_color: Option<String>,
+    pub fill: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_color: Option<String>,
 }
 
 /// Lightweight vector-graphic primitive derived from PDFium path objects.
@@ -426,10 +717,15 @@ mod tests {
             page_number: 1,
             page_width: 100.0,
             page_height: 200.0,
+            content_bounds: None,
             text_items: vec![sample_item()],
             graphics: vec![],
+            vector_graphics: None,
             struct_nodes: vec![],
             image_refs: vec![],
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
         };
         let s = serde_json::to_string(&p).unwrap();
         assert!(s.contains("\"page_number\":1"));

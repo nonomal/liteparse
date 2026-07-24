@@ -13,7 +13,9 @@ use crate::output::markdown;
 use crate::projection;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::render;
-use crate::types::{ExtractedImage, OutlineTarget, Page, ParsedPage, PdfInput};
+use crate::types::{
+    ExtractedImage, OutlineTarget, Page, ParsedPage, PdfInput, ScreenshotRect, XfaPacket,
+};
 use pdfium::Library;
 
 /// Result of parsing a document.
@@ -26,10 +28,23 @@ pub struct ParseResult {
     /// emitter as a high-priority heading source on untagged PDFs.
     pub outline: Vec<OutlineTarget>,
     /// Raster images extracted from the document. Empty unless the parser
-    /// was configured with `ImageMode::Embed`. Each entry carries the same
-    /// `id` the markdown emitter referenced in `![](image_{id}.png)`, so the
-    /// caller can match them up without parsing markdown.
+    /// was configured with `extract_images`. Each entry carries the same
+    /// `id` and `format` the markdown emitter referenced, so the caller can
+    /// match them up without parsing markdown.
     pub images: Vec<ExtractedImage>,
+    /// Number of embedded image objects that could not be extracted. A bad
+    /// image does not fail the rest of the document parse.
+    pub image_error_count: u32,
+    /// PDFium form type (0 none, 1 AcroForm, 2 XFA full, 3 XFA foreground),
+    /// present only when form-field extraction is enabled.
+    pub form_type: Option<i32>,
+    /// The document's `/Info` `Creator` entry, when present.
+    pub creator: Option<String>,
+    /// The document's `/Info` `Producer` entry, when present.
+    pub producer: Option<String>,
+    /// Raw XFA packets, present only when `extract_xfa_packets` is enabled.
+    /// `Some([])` means extraction ran on a non-XFA document.
+    pub xfa_packets: Option<Vec<XfaPacket>>,
 }
 
 /// Result of rendering a single page screenshot.
@@ -39,6 +54,11 @@ pub struct ScreenshotResult {
     pub width: u32,
     pub height: u32,
     pub image_bytes: Vec<u8>,
+    /// True when every pixel has the same color (blank page after render).
+    pub is_solid_fill: bool,
+    /// Solid rectangles/lines detected in the raster (viewport coords).
+    /// Populated only when `LiteParseConfig::detect_screenshot_rects` is on.
+    pub rects: Vec<ScreenshotRect>,
 }
 
 /// Env var pointing at a fragmented glyph-outline → unicode font database
@@ -47,6 +67,83 @@ pub struct ScreenshotResult {
 /// recovered without any extra wiring. Unset (default) leaves the hook dormant.
 #[cfg(not(target_arch = "wasm32"))]
 const FONT_DB_DIR_ENV: &str = "LITEPARSE_FONT_DB_DIR";
+
+#[cfg(not(target_arch = "wasm32"))]
+fn write_extracted_images(
+    output_dir: &str,
+    images: &mut [ExtractedImage],
+) -> Result<(), LiteParseError> {
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    std::fs::create_dir_all(output_dir)?;
+    // Platform contract (mirrors the LlamaParse C extractor, which the worker
+    // pipeline is built around): only the canonical file is written; every
+    // duplicate placement keeps its own `name` but points `path` at the
+    // canonical file. Markdown figure references are rewritten to the
+    // canonical name (`rewrite_duplicate_image_refs`) so they only ever
+    // reference files that exist.
+    let mut written: HashMap<String, String> = HashMap::new();
+    for image in images {
+        if let Some(canonical) = image.duplicate_of.as_ref()
+            && let Some(path) = written.get(canonical)
+        {
+            image.path = Some(path.clone());
+            continue;
+        }
+
+        let path = Path::new(output_dir).join(&image.name);
+        std::fs::write(&path, image.bytes.as_slice())?;
+        let path = path.to_string_lossy().into_owned();
+        image.path = Some(path.clone());
+        written.insert(image.id.clone(), path);
+    }
+    Ok(())
+}
+
+/// Rewrite markdown figure references for deduplicated images to the
+/// canonical entry's file name. The markdown emitter references each figure
+/// by its own placement id (`![](img_p2_1.jpg)`), but only the canonical
+/// file is written to disk (see `write_extracted_images`), so duplicate
+/// placements must reference the canonical name, matching the resolution the
+/// LlamaParse worker applies via `resolveOutputImageName`.
+fn rewrite_duplicate_image_refs(
+    pages: &mut [ParsedPage],
+    full_text: &mut String,
+    images: &[ExtractedImage],
+) {
+    use std::collections::HashMap;
+
+    let by_id: HashMap<&str, &ExtractedImage> = images
+        .iter()
+        .map(|image| (image.id.as_str(), image))
+        .collect();
+    let renames: Vec<(String, String)> = images
+        .iter()
+        .filter_map(|image| {
+            let canonical = by_id.get(image.duplicate_of.as_ref()?.as_str())?;
+            Some((
+                format!("![](img_{}.{})", image.id, image.format),
+                format!("![]({})", canonical.name),
+            ))
+        })
+        .collect();
+    if renames.is_empty() {
+        return;
+    }
+
+    for markdown in pages
+        .iter_mut()
+        .map(|page| &mut page.markdown)
+        .chain(std::iter::once(full_text))
+    {
+        for (from, to) in &renames {
+            if markdown.contains(from.as_str()) {
+                *markdown = markdown.replace(from.as_str(), to);
+            }
+        }
+    }
+}
 
 /// Build the default glyph resolver from the environment, if configured.
 #[cfg(not(target_arch = "wasm32"))]
@@ -130,9 +227,24 @@ impl LiteParse {
             .map_err(|e| format!("invalid --target-pages: {}", e).into())
     }
 
+    fn validate_output_config(&self) -> Result<(), LiteParseError> {
+        if self.config.image_output_dir.is_some() && !self.config.effective_extract_images() {
+            return Err(LiteParseError::Config(
+                "image_output_dir requires extract_images = true (or image_mode = embed)"
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Determine the complexity of each page in a document, returning a vector
     /// of `PageComplexityStats` for each page. This is useful for deciding
     /// whether to enable OCR on a per-page basis, or for other heuristics.
+    ///
+    /// Besides the OCR-need signals, each entry carries `layout` signals
+    /// (multi-column, ruled tables, dense graphics) computed by running the
+    /// real grid-projection pass — useful for routing pages to a
+    /// higher-accuracy pipeline even when no OCR is needed.
     pub async fn is_complex(
         &self,
         input: PdfInput,
@@ -161,36 +273,57 @@ impl LiteParse {
         // pass fast (its whole purpose is a cheap pre-OCR check).
         let password = self.config.password.as_deref();
 
-        let lib = Library::init();
-        let document = extract::load_document_from_input(&lib, &validated_input, password)?;
+        let (pages, mut page_complexities) = {
+            let lib = Library::init();
+            let document = extract::load_document_from_input(&lib, &validated_input, password)?;
 
-        let (pages, _) = extract::extract_pages_and_images(
-            &document,
-            target_pages.as_deref(),
-            self.config.max_pages,
-            false, // render_images: image rasters not needed for complexity
-            false, // extract_links: irrelevant for complexity stats
-            self.glyph_resolver.as_deref(),
-            false, // emit_word_boxes: word boxes not needed for complexity stats
-        )?;
-        let t_extract = web_time::Instant::now();
-        log(&format!(
-            "[liteparse] extract: {:.1}ms ({} pages)",
-            t_extract.duration_since(t0).as_secs_f64() * 1000.0,
-            pages.len()
-        ));
+            let (pages, _, _) = extract::extract_pages_and_images(
+                &document,
+                target_pages.as_deref(),
+                self.config.max_pages,
+                false, // extract_links: irrelevant for complexity stats
+                self.glyph_resolver.as_deref(),
+                extract::ExtractionOutputOptions::default(),
+            )?;
+            let t_extract = web_time::Instant::now();
+            log(&format!(
+                "[liteparse] extract: {:.1}ms ({} pages)",
+                t_extract.duration_since(t0).as_secs_f64() * 1000.0,
+                pages.len()
+            ));
 
-        let t_complexity = web_time::Instant::now();
-        let page_complexities = pages
-            .iter()
-            .map(|page| {
-                let page_obj = document.page((page.page_number - 1) as i32)?;
-                ocr_merge::calculate_page_complexity(page, &page_obj)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            let page_complexities = pages
+                .iter()
+                .map(|page| {
+                    let page_obj = document.page((page.page_number - 1) as i32)?;
+                    ocr_merge::calculate_page_complexity(page, &page_obj)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            log(&format!(
+                "[liteparse] complexity: {:.1}ms",
+                web_time::Instant::now()
+                    .duration_since(t_extract)
+                    .as_secs_f64()
+                    * 1000.0
+            ));
+            // `lib` is dropped here, releasing the PDFium lock; the layout
+            // pass below is pure CPU over the already-extracted items.
+            (pages, page_complexities)
+        };
+
+        // Layout signals come from the real projection pass so they match
+        // what a full parse will decide.
+        let t_layout = web_time::Instant::now();
+        let parsed_pages = projection::project_pages_to_grid(pages);
+        for (stats, page) in page_complexities.iter_mut().zip(&parsed_pages) {
+            stats.layout = Some(ocr_merge::calculate_layout_complexity(page));
+        }
         log(&format!(
-            "[liteparse] complexity: {:.1}ms",
-            t_complexity.duration_since(t_extract).as_secs_f64() * 1000.0
+            "[liteparse] layout: {:.1}ms",
+            web_time::Instant::now()
+                .duration_since(t_layout)
+                .as_secs_f64()
+                * 1000.0
         ));
 
         Ok(page_complexities)
@@ -221,6 +354,8 @@ impl LiteParse {
 
         let t0 = web_time::Instant::now();
 
+        self.validate_output_config()?;
+
         #[cfg(not(target_arch = "wasm32"))]
         let (validated_input, _guard) =
             conversion::resolve_pdf_input(input, self.config.password.as_deref(), false).await?;
@@ -237,8 +372,6 @@ impl LiteParse {
         // projection (pure Rust) do not touch PDFium, so they can run
         // concurrently with other `LiteParse` calls.
         let password = self.config.password.as_deref();
-        let render_images = matches!(self.config.image_mode, crate::config::ImageMode::Embed);
-
         // Build the OCR engine up front so the renderer knows whether to emit a
         // grayscale buffer (cheaper, for engines that binarize internally) or RGB.
         let ocr_engine: Option<std::sync::Arc<dyn OcrEngine>> = if self.config.ocr_enabled {
@@ -285,19 +418,78 @@ impl LiteParse {
         };
         let ocr_grayscale = ocr_engine.as_ref().is_some_and(|e| e.prefers_grayscale());
 
-        let (pages, ocr_rendered, outline, images) = {
+        #[allow(unused_mut)] // mutated only by the native image-output writer
+        let (
+            pages,
+            ocr_rendered,
+            outline,
+            mut images,
+            image_error_count,
+            complexity,
+            form_type,
+            creator,
+            producer,
+            xfa_packets,
+        ) = {
             let lib = Library::init();
-            let document = extract::load_document_from_input(&lib, &validated_input, password)?;
+            #[cfg(not(target_arch = "wasm32"))]
+            let repaired_input = self
+                .config
+                .extract_form_fields
+                .then(|| {
+                    crate::acroform_repair::repair_orphaned_widgets(
+                        &lib,
+                        &validated_input,
+                        password,
+                    )
+                })
+                .flatten();
+            #[cfg(not(target_arch = "wasm32"))]
+            let document_input = repaired_input.as_ref().unwrap_or(&validated_input);
+            #[cfg(target_arch = "wasm32")]
+            let document_input = &validated_input;
+            let document = extract::load_document_from_input(&lib, document_input, password)?;
+            let form_type = self
+                .config
+                .extract_form_fields
+                .then(|| document.form_type());
+            let creator = document.meta_text("Creator");
+            let producer = document.meta_text("Producer");
+            let xfa_packets = self.config.extract_xfa_packets.then(|| {
+                document
+                    .xfa_packets()
+                    .into_iter()
+                    .map(|packet| XfaPacket {
+                        index: packet.index.max(0) as u32,
+                        name: packet.name,
+                        content_length: packet
+                            .content
+                            .as_ref()
+                            .map_or(0, |content| content.len() as u32),
+                        content: packet
+                            .content
+                            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()),
+                    })
+                    .collect::<Vec<_>>()
+            });
             let outline = extract::extract_outline(&document);
-            let (pages, images) = extract::extract_pages_and_images(
+            let (pages, images, image_error_count) = extract::extract_pages_and_images(
                 &document,
                 target_pages.as_deref(),
                 self.config.max_pages,
-                render_images,
                 self.config.extract_links
                     && self.config.output_format == crate::config::OutputFormat::Markdown,
                 self.glyph_resolver.as_deref(),
-                self.config.emit_word_boxes,
+                extract::ExtractionOutputOptions {
+                    extract_content_bounds: self.config.extract_content_bounds,
+                    extract_images: self.config.effective_extract_images(),
+                    emit_word_boxes: self.config.emit_word_boxes,
+                    extract_text_metadata: self.config.extract_text_metadata,
+                    extract_vector_graphics: self.config.extract_vector_graphics,
+                    extract_annotations: self.config.extract_annotations,
+                    extract_form_fields: self.config.extract_form_fields,
+                    extract_structure_tree: self.config.extract_structure_tree,
+                },
             )?;
             let t_extract = web_time::Instant::now();
             log(&format!(
@@ -311,6 +503,7 @@ impl LiteParse {
                     &pages,
                     self.config.dpi,
                     ocr_grayscale,
+                    self.config.render_form_fields,
                 )?;
                 log(&format!(
                     "[liteparse] ocr render: {:.1}ms ({} pages)",
@@ -324,8 +517,31 @@ impl LiteParse {
             } else {
                 Vec::new()
             };
+
+            let complexity = if self.config.include_complexity {
+                pages
+                    .iter()
+                    .map(|page| {
+                        let page_obj = document.page((page.page_number - 1) as i32)?;
+                        ocr_merge::calculate_page_complexity(page, &page_obj)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            } else {
+                Vec::new()
+            };
             // `lib` is dropped here, releasing the PDFium lock.
-            (pages, rendered, outline, images)
+            (
+                pages,
+                rendered,
+                outline,
+                images,
+                image_error_count,
+                complexity,
+                form_type,
+                creator,
+                producer,
+                xfa_packets,
+            )
         };
         let mut pages = pages;
         let t1 = web_time::Instant::now();
@@ -335,7 +551,6 @@ impl LiteParse {
             ocr_merge::ocr_and_merge_rendered(
                 &mut pages,
                 ocr_rendered,
-                self.config.dpi,
                 engine,
                 &self.config.ocr_language,
                 self.config.num_workers,
@@ -360,13 +575,20 @@ impl LiteParse {
 
         // Grid projection
         let mut parsed_pages = projection::project_pages_to_grid(pages);
+
+        // Attach per-page complexity signals, including the layout signals
+        // that need the projected page (same as `is_complex()` reports).
+        for (page, mut stats) in parsed_pages.iter_mut().zip(complexity) {
+            stats.layout = Some(ocr_merge::calculate_layout_complexity(page));
+            page.complexity = Some(stats);
+        }
         let t2 = web_time::Instant::now();
         log(&format!(
             "[liteparse] project: {:.1}ms",
             t2.duration_since(t_ocr).as_secs_f64() * 1000.0
         ));
 
-        let full_text = if self.config.output_format == crate::config::OutputFormat::Markdown {
+        let mut full_text = if self.config.output_format == crate::config::OutputFormat::Markdown {
             let page_md =
                 markdown::format_markdown_pages(&parsed_pages, &outline, self.config.image_mode);
             let md = page_md.join("\n\n-----\n\n");
@@ -386,15 +608,30 @@ impl LiteParse {
                 .collect::<Vec<_>>()
                 .join("\n\n")
         };
+        if self.config.output_format == crate::config::OutputFormat::Markdown {
+            rewrite_duplicate_image_refs(&mut parsed_pages, &mut full_text, &images);
+        }
 
         let total = web_time::Instant::now().duration_since(t0).as_secs_f64() * 1000.0;
         log(&format!("[liteparse] total: {:.1}ms", total));
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.config.effective_extract_images()
+            && let Some(output_dir) = self.config.image_output_dir.as_deref()
+        {
+            write_extracted_images(output_dir, &mut images)?;
+        }
 
         Ok(ParseResult {
             pages: parsed_pages,
             text: full_text,
             outline,
             images,
+            image_error_count,
+            form_type,
+            creator,
+            producer,
+            xfa_packets,
         })
     }
 
@@ -430,6 +667,11 @@ impl LiteParse {
             text: full_text,
             outline,
             images: Vec::new(),
+            image_error_count: 0,
+            form_type: None,
+            creator: None,
+            producer: None,
+            xfa_packets: None,
         }
     }
 
@@ -475,6 +717,8 @@ impl LiteParse {
             page_numbers.as_deref(),
             self.config.dpi,
             self.config.password.as_deref(),
+            self.config.detect_screenshot_rects,
+            self.config.render_form_fields,
         )?;
 
         Ok(rendered
@@ -484,6 +728,8 @@ impl LiteParse {
                 width: page.width,
                 height: page.height,
                 image_bytes: page.png_bytes,
+                is_solid_fill: page.is_solid_fill,
+                rects: page.rects,
             })
             .collect())
     }
@@ -496,6 +742,42 @@ impl LiteParse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{Page, TextItem};
+
+    fn page_with_text_metadata() -> Page {
+        Page {
+            page_number: 1,
+            page_width: 100.0,
+            page_height: 100.0,
+            content_bounds: None,
+            text_items: vec![TextItem {
+                text: "hello".into(),
+                width: 20.0,
+                height: 10.0,
+                font_name: Some("Helvetica".into()),
+                font_size: Some(10.0),
+                font_height: Some(10.0),
+                font_ascent: Some(8.0),
+                font_descent: Some(-2.0),
+                font_weight: Some(700),
+                text_width: Some(19.0),
+                font_is_buggy: true,
+                mcid: Some(3),
+                fill_color: Some("ff112233".into()),
+                stroke_color: Some("ff445566".into()),
+                char_codes: vec![104, 101, 108, 108, 111],
+                trailing_space_generated: true,
+                ..Default::default()
+            }],
+            graphics: vec![],
+            vector_graphics: None,
+            struct_nodes: vec![],
+            image_refs: vec![],
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
+        }
+    }
 
     #[test]
     #[allow(clippy::field_reassign_with_default)]
@@ -506,5 +788,153 @@ mod tests {
         let lp = LiteParse::new(cfg);
         assert!(!lp.config().ocr_enabled);
         assert_eq!(lp.config().max_pages, 7);
+    }
+
+    #[test]
+    fn parse_from_pages_preserves_internal_text_metadata() {
+        let result = LiteParse::new(LiteParseConfig::default())
+            .parse_from_pages(vec![page_with_text_metadata()], vec![]);
+        let item = &result.pages[0].text_items[0];
+        assert_eq!(item.font_name.as_deref(), Some("Helvetica"));
+        assert_eq!(item.font_size, Some(10.0));
+        assert_eq!(item.font_height, Some(10.0));
+        assert_eq!(item.font_ascent, Some(8.0));
+        assert_eq!(item.font_descent, Some(-2.0));
+        assert_eq!(item.font_weight, Some(700));
+        assert_eq!(item.text_width, Some(19.0));
+        assert!(item.font_is_buggy);
+        assert_eq!(item.mcid, Some(3));
+        assert_eq!(item.fill_color.as_deref(), Some("ff112233"));
+        assert_eq!(item.stroke_color.as_deref(), Some("ff445566"));
+        assert_eq!(item.char_codes, vec![104, 101, 108, 108, 111]);
+        assert!(item.trailing_space_generated);
+    }
+
+    #[test]
+    fn image_extraction_is_opt_in_but_embed_mode_implies_it() {
+        let default = LiteParseConfig::default();
+        assert!(!default.effective_extract_images());
+
+        // `image_mode = embed` predates `extract_images` and must keep
+        // extracting bytes for existing callers.
+        let embed = LiteParseConfig {
+            image_mode: crate::config::ImageMode::Embed,
+            ..Default::default()
+        };
+        assert!(embed.effective_extract_images());
+
+        let explicit = LiteParseConfig {
+            extract_images: true,
+            ..Default::default()
+        };
+        assert!(explicit.effective_extract_images());
+    }
+
+    #[test]
+    fn image_output_dir_requires_image_extraction() {
+        let parser = LiteParse::new(LiteParseConfig {
+            image_output_dir: Some("images".into()),
+            ..Default::default()
+        });
+        assert_eq!(
+            parser.validate_output_config().unwrap_err().to_string(),
+            "invalid config: image_output_dir requires extract_images = true (or image_mode = embed)"
+        );
+
+        let embed = LiteParse::new(LiteParseConfig {
+            image_mode: crate::config::ImageMode::Embed,
+            image_output_dir: Some("images".into()),
+            ..Default::default()
+        });
+        assert!(embed.validate_output_config().is_ok());
+    }
+
+    #[test]
+    fn image_output_writes_duplicates_from_canonical_bytes() {
+        fn image(id: &str, duplicate_of: Option<&str>, bytes: &[u8]) -> ExtractedImage {
+            ExtractedImage {
+                id: id.into(),
+                name: format!("img_{id}.png"),
+                path: None,
+                page: 1,
+                bbox: crate::types::Rect::default(),
+                width: 2,
+                height: 2,
+                rotation: 0.0,
+                format: "png".into(),
+                duplicate_of: duplicate_of.map(str::to_owned),
+                bytes: std::sync::Arc::new(bytes.to_vec()),
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut images = vec![
+            image("p1_1", None, b"canonical"),
+            image("p2_1", Some("p1_1"), b"canonical"),
+        ];
+        write_extracted_images(dir.path().to_str().unwrap(), &mut images).unwrap();
+
+        // Platform contract: one file on disk; the duplicate keeps its own
+        // placement `name` but shares the canonical file's `path`.
+        assert_eq!(images[0].name, "img_p1_1.png");
+        assert_eq!(images[1].name, "img_p2_1.png");
+        assert_eq!(images[0].path, images[1].path);
+        assert_eq!(
+            std::fs::read(images[0].path.as_ref().unwrap()).unwrap(),
+            b"canonical"
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn duplicate_image_markdown_refs_are_rewritten_to_canonical() {
+        fn image(id: &str, format: &str, duplicate_of: Option<&str>) -> ExtractedImage {
+            ExtractedImage {
+                id: id.into(),
+                name: format!("img_{id}.{format}"),
+                path: None,
+                page: 1,
+                bbox: crate::types::Rect::default(),
+                width: 2,
+                height: 2,
+                rotation: 0.0,
+                format: format.into(),
+                duplicate_of: duplicate_of.map(str::to_owned),
+                bytes: std::sync::Arc::new(Vec::new()),
+            }
+        }
+
+        let mut pages = vec![ParsedPage {
+            page_number: 1,
+            page_width: 612.0,
+            page_height: 792.0,
+            content_bounds: None,
+            text: String::new(),
+            markdown: "intro\n\n![](img_p2_1.jpg)\n\noutro".into(),
+            text_items: vec![],
+            projected_lines: vec![],
+            regions: crate::types::Region::default(),
+            graphics: vec![],
+            vector_graphics: None,
+            figures: vec![],
+            struct_nodes: vec![],
+            image_refs: vec![],
+            complexity: None,
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
+        }];
+        let mut full_text = pages[0].markdown.clone();
+        let images = vec![
+            image("p1_1", "jpg", None),
+            image("p2_1", "jpg", Some("p1_1")),
+        ];
+
+        rewrite_duplicate_image_refs(&mut pages, &mut full_text, &images);
+
+        // The duplicate's ref now points at the canonical file; canonical
+        // refs and surrounding text are untouched.
+        assert_eq!(pages[0].markdown, "intro\n\n![](img_p1_1.jpg)\n\noutro");
+        assert_eq!(full_text, pages[0].markdown);
     }
 }

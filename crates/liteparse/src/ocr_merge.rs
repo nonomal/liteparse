@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::error::LiteParseError;
 use crate::ocr::{OcrEngine, OcrOptions, OcrResult};
-use crate::types::{Page, TextItem};
+use crate::types::{CutAxis, Page, ParsedPage, Region, RegionKind, TextItem};
 use pdfium::{Document, ImageBounds};
 use serde::Serialize;
 
@@ -23,6 +23,19 @@ const MIN_IMAGE_SIZE_PT: f32 = 25.0;
 /// full-page background and ignored.
 const MAX_IMAGE_PAGE_COVERAGE: f32 = 0.9;
 
+/// An XY-cut subtree must hold at least this many text items to count as a
+/// text column, regardless of page size.
+const MIN_COLUMN_ITEMS: usize = 8;
+
+/// ...and at least this fraction of the page's text items. Together with
+/// `MIN_COLUMN_ITEMS` this keeps thin sidebars, figure captions, and margin
+/// notes from flagging a page as multi-column.
+const MIN_COLUMN_ITEM_FRACTION: f32 = 0.15;
+
+/// Figure coverage at or above this fraction of the page area flags
+/// `DenseGraphics`.
+const DENSE_GRAPHICS_MIN_COVERAGE: f32 = 0.2;
+
 /// Owned page bitmap prepared for OCR. Indices refer to positions in the `pages` slice.
 pub(crate) struct RenderedPage {
     pub idx: usize,
@@ -30,16 +43,13 @@ pub(crate) struct RenderedPage {
     pub pixels: Vec<u8>,
     pub width: u32,
     pub height: u32,
+    /// DPI this page was actually rendered at.
+    pub dpi: f32,
 }
 
 /// Why a page was flagged as needing more than the cheap text-only path.
 /// Multiple reasons can apply to one page (e.g. a sparse page whose little
 /// text is also garbled). Empty exactly when `needs_ocr` is false.
-///
-/// This is the discriminator a caller routes on: a scan goes to OCR, dense
-/// vector text to a vector-aware pass, and so on. New variants will be added
-/// as the routing function learns to recommend heavier pipelines (tables,
-/// charts, LLM passes), so callers should treat unknown variants leniently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ComplexityReason {
@@ -75,7 +85,7 @@ impl ComplexityReason {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PageComplexityStats {
     pub page_number: usize,
     pub text_length: usize,
@@ -111,6 +121,13 @@ pub struct PageComplexityStats {
     pub needs_ocr: bool,
     /// Every reason the page was flagged, in no particular priority order.
     pub reasons: Vec<ComplexityReason>,
+    /// Layout-difficulty signals (columns, tables, dense graphics), computed
+    /// from the post-projection page. Orthogonal to `needs_ocr`/`reasons`:
+    /// none of these imply OCR. `None` in the internal per-page OCR gate
+    /// (`render_pages_for_ocr`), which never runs projection — only
+    /// `is_complex()` and `include_complexity` parses populate it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<LayoutComplexityStats>,
 }
 
 pub(crate) fn calculate_page_complexity(
@@ -232,20 +249,191 @@ pub(crate) fn calculate_page_complexity(
         page_area,
         needs_ocr,
         reasons,
+        layout: None,
     })
+}
+
+/// Why a page's layout is expected to be hard to reconstruct faithfully.
+/// Orthogonal to `ComplexityReason`: none of these imply OCR — they signal
+/// that the text-only path may mangle reading order or structure, so a caller
+/// can route the page to a higher-accuracy pipeline. Same leniency contract
+/// as `ComplexityReason`: new variants will be added, treat unknowns kindly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LayoutComplexityReason {
+    /// The XY-cut layout tree splits the page into two or more side-by-side
+    /// regions that each hold a substantial share of the text.
+    MultiColumn,
+    /// Table structure detected: ruled-line grid(s) and/or borderless
+    /// column-aligned text runs — the same detectors the markdown emitter
+    /// uses. Description lists (label/value pairs) do not count.
+    TableLikely,
+    /// Figure regions (charts, diagrams, decorated boxes) cover a large
+    /// fraction of the page; their vector content is invisible to text
+    /// extraction.
+    DenseGraphics,
+}
+
+impl LayoutComplexityReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LayoutComplexityReason::MultiColumn => "multi-column",
+            LayoutComplexityReason::TableLikely => "table-likely",
+            LayoutComplexityReason::DenseGraphics => "dense-graphics",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LayoutComplexityStats {
+    /// Side-by-side text columns found by the XY-cut layout pass (1 = single
+    /// column). Only subtrees holding a substantial share of the page's text
+    /// count, so a thin sidebar or caption does not inflate this.
+    pub column_count: usize,
+    /// Validated ruled-table runs on the page: grid components confirmed
+    /// against the projected text, so a boxed callout or a chart's axis
+    /// gridlines — lines without cell structure — don't count.
+    pub ruled_table_count: usize,
+    /// Combined validated ruled-table area (text extent) over page area,
+    /// clamped to 1.0.
+    pub ruled_table_coverage: f32,
+    /// Borderless table runs found by the emitter's track-alignment detector
+    /// over the projected lines (description lists excluded). Ruled tables'
+    /// text rows also align to tracks, so this overlaps `ruled_table_count`
+    /// and must not be summed with it.
+    pub text_table_run_count: usize,
+    /// Figure regions clustered from vector graphics.
+    pub figure_count: usize,
+    /// Combined figure area over page area, clamped to 1.0. Overlapping rects
+    /// can inflate the sum past the truly covered fraction — same caveat as
+    /// `image_coverage`.
+    pub figure_coverage: f32,
+    /// Whether any layout reason fired. Equivalent to `!reasons.is_empty()`,
+    /// kept flat for the common predicate case (mirrors `needs_ocr`).
+    pub is_complex: bool,
+    pub reasons: Vec<LayoutComplexityReason>,
+}
+
+/// Compute layout-difficulty signals from a projected page. Read-only over
+/// structures projection already built: the XY-cut region tree for columns,
+/// `figures` for graphics density, and the emitter's own table detectors —
+/// validated ruled grids and borderless track-aligned runs — over the
+/// projected lines and vector primitives.
+pub(crate) fn calculate_layout_complexity(page: &ParsedPage) -> LayoutComplexityStats {
+    let page_area = page.page_width * page.page_height;
+    let total_items = page.text_items.len();
+
+    let column_count = count_columns(&page.regions, total_items).max(1);
+
+    let table_rects = crate::markdown_layout::validated_ruled_table_rects(
+        &page.projected_lines,
+        &page.graphics,
+        page.page_width,
+        page.page_height,
+    );
+    let text_table_run_count = crate::markdown_layout::count_text_table_runs(&page.projected_lines);
+    let table_area: f32 = table_rects
+        .iter()
+        .map(|r| r.width.max(0.0) * r.height.max(0.0))
+        .sum();
+    let figure_area: f32 = page
+        .figures
+        .iter()
+        .map(|r| r.width.max(0.0) * r.height.max(0.0))
+        .sum();
+    // The `area > 0.0` guard also normalizes the `-0.0` an empty `f32` sum
+    // yields, which would otherwise serialize as `-0.0` in JSON.
+    let coverage = |area: f32| {
+        if page_area > 0.0 && area > 0.0 {
+            (area / page_area).min(1.0)
+        } else {
+            0.0
+        }
+    };
+    let ruled_table_coverage = coverage(table_area);
+    let figure_coverage = coverage(figure_area);
+
+    let mut reasons = Vec::new();
+    if column_count >= 2 {
+        reasons.push(LayoutComplexityReason::MultiColumn);
+    }
+    if !table_rects.is_empty() || text_table_run_count > 0 {
+        reasons.push(LayoutComplexityReason::TableLikely);
+    }
+    if figure_coverage >= DENSE_GRAPHICS_MIN_COVERAGE {
+        reasons.push(LayoutComplexityReason::DenseGraphics);
+    }
+
+    LayoutComplexityStats {
+        column_count,
+        ruled_table_count: table_rects.len(),
+        ruled_table_coverage,
+        text_table_run_count,
+        figure_count: page.figures.len(),
+        figure_coverage,
+        is_complex: !reasons.is_empty(),
+        reasons,
+    }
+}
+
+fn region_item_count(region: &Region) -> usize {
+    match &region.kind {
+        RegionKind::Leaf { item_indices } => item_indices.len(),
+        RegionKind::Split { children, .. } => children.iter().map(region_item_count).sum(),
+    }
+}
+
+/// Count side-by-side text columns in an XY-cut subtree. Subtrees below the
+/// substantiality bar contribute zero. Vertical splits sum their children
+/// (side-by-side regions), horizontal splits take the max of theirs (stacked
+/// bands — a full-width title above a two-column body is a two-column page).
+/// Nested vertical splits therefore count correctly: a three-column page cut
+/// as `V(a, V(b, c))` yields 3.
+fn count_columns(region: &Region, total_items: usize) -> usize {
+    let min_items =
+        MIN_COLUMN_ITEMS.max((total_items as f32 * MIN_COLUMN_ITEM_FRACTION).ceil() as usize);
+    if region_item_count(region) < min_items {
+        return 0;
+    }
+    match &region.kind {
+        RegionKind::Leaf { .. } => 1,
+        RegionKind::Split { axis, children } => {
+            let counts = children.iter().map(|c| count_columns(c, total_items));
+            match axis {
+                CutAxis::Vertical => counts.sum(),
+                CutAxis::Horizontal => counts.max().unwrap_or(0),
+            }
+        }
+    }
 }
 
 /// Render pages that need OCR from an already-open document.
 ///
 /// The pdfium `Document` holds raw pointers that are not `Send`, so callers must
 /// drop it before awaiting the OCR engine.
+///
+/// Cap on the rendered long edge (in pixels) for OCR page rasters
+/// to avoid excessive memory usage.
+pub(crate) const MAX_OCR_RENDER_LONG_EDGE_PX: f32 = 4096.0;
+
 pub(crate) fn render_pages_for_ocr(
     document: &Document,
     pages: &[Page],
     dpi: f32,
     grayscale: bool,
+    render_form_fields: bool,
 ) -> Result<Vec<RenderedPage>, LiteParseError> {
     let mut rendered = Vec::new();
+    // With `render_form_fields`, draw form-field appearances into the OCR
+    // raster so filled-in form values are visible to the OCR engine (matches
+    // the LlamaParse extract binary's screenshot rendering). Opt-in because
+    // the form environment runs the document's open/JS actions.
+    let form = render_form_fields
+        .then(|| document.form_environment())
+        .flatten();
+    if let Some(form) = form.as_ref() {
+        form.run_document_actions();
+    }
     for (idx, page) in pages.iter().enumerate() {
         let page_obj = document.page((page.page_number - 1) as i32)?;
         let page_complexity = calculate_page_complexity(page, &page_obj)?;
@@ -254,7 +442,17 @@ pub(crate) fn render_pages_for_ocr(
             continue;
         }
 
-        let bitmap = page_obj.render(dpi)?;
+        // Clamp the render DPI so the long edge stays within the raster budget.
+        let long_edge_pt = page.page_width.max(page.page_height);
+        let mut eff_dpi = dpi;
+        if long_edge_pt > 0.0 {
+            let max_dpi = MAX_OCR_RENDER_LONG_EDGE_PX * 72.0 / long_edge_pt;
+            if eff_dpi > max_dpi {
+                eff_dpi = max_dpi;
+            }
+        }
+
+        let bitmap = page_obj.render_with_form(eff_dpi, form.as_ref())?;
         let width = bitmap.width() as u32;
         let height = bitmap.height() as u32;
         // Grayscale or RGB per the engine; see `OcrEngine::prefers_grayscale`.
@@ -269,6 +467,7 @@ pub(crate) fn render_pages_for_ocr(
             pixels,
             width,
             height,
+            dpi: eff_dpi,
         });
     }
     Ok(rendered)
@@ -278,7 +477,6 @@ pub(crate) fn render_pages_for_ocr(
 pub(crate) async fn ocr_and_merge_rendered(
     pages: &mut [Page],
     rendered: Vec<RenderedPage>,
-    dpi: f32,
     ocr_engine: Arc<dyn OcrEngine>,
     ocr_language: &str,
     num_workers: usize,
@@ -313,10 +511,14 @@ pub(crate) async fn ocr_and_merge_rendered(
         handles.push((
             r.idx,
             page_number,
+            r.dpi,
             tokio::spawn(async move {
                 // Park the task (not an OS thread) until a permit is available.
                 let _permit = sem.acquire_owned().await.expect("semaphore closed");
-                let options = OcrOptions { language, dpi };
+                let options = OcrOptions {
+                    language,
+                    dpi: r.dpi,
+                };
                 // Offload the (possibly CPU-blocking, e.g. Tesseract) recognize
                 // onto a blocking thread. Because the permit is already held,
                 // at most `num_workers` blocking threads are in use at once,
@@ -337,7 +539,6 @@ pub(crate) async fn ocr_and_merge_rendered(
     }
 
     // Phase 3: collect results and merge into pages.
-    let scale_factor = 72.0 / dpi;
 
     // Track OCR task outcomes so we can distinguish a systemic failure (e.g.
     // missing Tesseract language data, which fails identically on every page)
@@ -356,7 +557,7 @@ pub(crate) async fn ocr_and_merge_rendered(
     let mut failed_sparse_text_page = false;
     let mut first_error: Option<String> = None;
 
-    for (idx, page_number, handle) in handles {
+    for (idx, page_number, page_dpi, handle) in handles {
         let ocr_results: Vec<OcrResult> = match handle.await {
             Ok(Ok(results)) => results,
             Ok(Err(e)) => {
@@ -386,6 +587,10 @@ pub(crate) async fn ocr_and_merge_rendered(
         if ocr_results.is_empty() {
             continue;
         }
+
+        // Pixel -> PDF-point scale for the DPI this page was actually rendered
+        // at (the long-edge cap can lower it below the configured DPI).
+        let scale_factor = 72.0 / page_dpi;
 
         let page = &mut pages[idx];
         // Drop unusable native items (substitution-cipher cmap corruption, or
@@ -734,6 +939,75 @@ fn clean_ocr_table_artifacts(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::Rect;
+
+    fn leaf(n: usize) -> Region {
+        Region {
+            bbox: Rect::default(),
+            kind: RegionKind::Leaf {
+                item_indices: (0..n).collect(),
+            },
+        }
+    }
+
+    fn split(axis: CutAxis, children: Vec<Region>) -> Region {
+        Region {
+            bbox: Rect::default(),
+            kind: RegionKind::Split { axis, children },
+        }
+    }
+
+    #[test]
+    fn test_count_columns_single_leaf() {
+        assert_eq!(count_columns(&leaf(50), 50), 1);
+    }
+
+    #[test]
+    fn test_count_columns_two_columns() {
+        let root = split(CutAxis::Vertical, vec![leaf(40), leaf(40)]);
+        assert_eq!(count_columns(&root, 80), 2);
+    }
+
+    #[test]
+    fn test_count_columns_nested_three_columns() {
+        // Three-column page cut as V(a, V(b, c)).
+        let inner = split(CutAxis::Vertical, vec![leaf(30), leaf(30)]);
+        let root = split(CutAxis::Vertical, vec![leaf(40), inner]);
+        assert_eq!(count_columns(&root, 100), 3);
+    }
+
+    #[test]
+    fn test_count_columns_header_over_two_columns() {
+        // Full-width title band stacked above a two-column body: the page is
+        // still two-column (horizontal splits take the max of their bands).
+        let body = split(CutAxis::Vertical, vec![leaf(40), leaf(40)]);
+        let root = split(CutAxis::Horizontal, vec![leaf(20), body]);
+        assert_eq!(count_columns(&root, 100), 2);
+    }
+
+    #[test]
+    fn test_count_columns_thin_sidebar_not_a_column() {
+        // A 6-item sidebar next to a 94-item body fails both the absolute
+        // (8-item) and fractional (15%) bars.
+        let root = split(CutAxis::Vertical, vec![leaf(6), leaf(94)]);
+        assert_eq!(count_columns(&root, 100), 1);
+    }
+
+    #[test]
+    fn test_count_columns_narrow_table_slices_not_columns() {
+        // Four narrow slices (10 items each of 100): each fails the 15%
+        // fractional bar, so none count — table-ish V-splits stay quiet.
+        let root = split(
+            CutAxis::Vertical,
+            vec![leaf(10), leaf(10), leaf(10), leaf(10)],
+        );
+        assert_eq!(count_columns(&root, 100), 0);
+    }
+
+    #[test]
+    fn test_count_columns_empty_page() {
+        assert_eq!(count_columns(&leaf(0), 0), 0);
+    }
 
     #[test]
     fn test_polygon_rotation_horizontal() {
@@ -916,10 +1190,15 @@ mod tests {
             page_number,
             page_width: 100.0,
             page_height: 100.0,
+            content_bounds: None,
             text_items: Vec::new(),
             graphics: Vec::new(),
+            vector_graphics: None,
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
         }
     }
 
@@ -930,6 +1209,7 @@ mod tests {
             pixels: vec![0u8],
             width: 1,
             height: 1,
+            dpi: 72.0,
         }
     }
 
@@ -941,6 +1221,7 @@ mod tests {
             page_number,
             page_width: 100.0,
             page_height: 100.0,
+            content_bounds: None,
             text_items: vec![TextItem {
                 text: "this page already has real native text content".into(),
                 x: 0.0,
@@ -950,8 +1231,12 @@ mod tests {
                 ..Default::default()
             }],
             graphics: Vec::new(),
+            vector_graphics: None,
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
         }
     }
 
@@ -964,6 +1249,7 @@ mod tests {
             page_number,
             page_width: 100.0,
             page_height: 100.0,
+            content_bounds: None,
             text_items: vec![TextItem {
                 text: "small native header that is not enough".into(),
                 x: 0.0,
@@ -973,8 +1259,12 @@ mod tests {
                 ..Default::default()
             }],
             graphics: Vec::new(),
+            vector_graphics: None,
             struct_nodes: Vec::new(),
             image_refs: Vec::new(),
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
         }
     }
 
@@ -986,8 +1276,7 @@ mod tests {
         let rendered = vec![make_rendered(0), make_rendered(1)];
         let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
 
-        let result =
-            ocr_and_merge_rendered(&mut pages, rendered, 72.0, engine, "eng", 2, true).await;
+        let result = ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, true).await;
 
         let err = result.expect_err("expected systemic OCR failure to be surfaced");
         let msg = err.to_string();
@@ -1008,8 +1297,7 @@ mod tests {
         let mut pages = vec![make_blank_page(1)];
         let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
 
-        let result =
-            ocr_and_merge_rendered(&mut pages, Vec::new(), 72.0, engine, "eng", 2, true).await;
+        let result = ocr_and_merge_rendered(&mut pages, Vec::new(), engine, "eng", 2, true).await;
 
         assert!(result.is_ok(), "empty OCR set should succeed: {result:?}");
     }
@@ -1023,8 +1311,7 @@ mod tests {
         let rendered = vec![make_rendered(0), make_rendered(1)];
         let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
 
-        let result =
-            ocr_and_merge_rendered(&mut pages, rendered, 72.0, engine, "eng", 2, true).await;
+        let result = ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, true).await;
 
         assert!(
             result.is_ok(),
@@ -1044,8 +1331,7 @@ mod tests {
         let rendered = vec![make_rendered(0), make_rendered(1)];
         let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
 
-        let result =
-            ocr_and_merge_rendered(&mut pages, rendered, 72.0, engine, "eng", 2, true).await;
+        let result = ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, true).await;
 
         let err = result.expect_err("a text-starved page losing all OCR must surface an error");
         assert!(
@@ -1063,8 +1349,7 @@ mod tests {
         let rendered = vec![make_rendered(0)];
         let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
 
-        let result =
-            ocr_and_merge_rendered(&mut pages, rendered, 72.0, engine, "eng", 2, true).await;
+        let result = ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, true).await;
 
         let err = result.expect_err("low-coverage text page losing OCR must surface an error");
         assert!(
@@ -1083,8 +1368,7 @@ mod tests {
         let rendered = vec![make_rendered(0), make_rendered(1)];
         let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
 
-        let result =
-            ocr_and_merge_rendered(&mut pages, rendered, 72.0, engine, "eng", 2, false).await;
+        let result = ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, false).await;
 
         assert!(
             result.is_ok(),

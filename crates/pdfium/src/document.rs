@@ -13,6 +13,15 @@ pub struct Document<'lib> {
     pub(crate) _lib: std::marker::PhantomData<&'lib Library>,
 }
 
+/// PDFium's form-fill environment for an open document. The callback table
+/// must remain alive until the handle is closed, even though LiteParse leaves
+/// every callback null and uses the environment for read-only field access.
+pub struct FormEnvironment<'doc, 'lib: 'doc> {
+    pub(crate) handle: pdfium_sys::FPDF_FORMHANDLE,
+    _callbacks: Box<pdfium_sys::FPDF_FORMFILLINFO>,
+    _doc: std::marker::PhantomData<&'doc Document<'lib>>,
+}
+
 /// One entry in the document's outline (bookmarks tree).
 #[derive(Debug, Clone)]
 pub struct OutlineEntry {
@@ -30,9 +39,45 @@ pub struct OutlineEntry {
     pub y: Option<f32>,
 }
 
+/// One raw packet from an XFA form document's `/XFA` array.
+#[derive(Debug, Clone)]
+pub struct XfaPacket {
+    /// Zero-based index in the XFA array.
+    pub index: i32,
+    /// Packet name (e.g. `template`, `datasets`), when present.
+    pub name: Option<String>,
+    /// Raw packet bytes (usually XML), when readable.
+    pub content: Option<Vec<u8>>,
+}
+
 impl<'lib> Document<'lib> {
     pub fn page_count(&self) -> i32 {
         unsafe { ffi!(FPDF_GetPageCount(self.handle)) }
+    }
+
+    pub fn form_type(&self) -> i32 {
+        unsafe { ffi!(FPDF_GetFormType(self.handle)) }
+    }
+
+    /// Initialize read-only AcroForm access. Returns `None` for documents with
+    /// no form catalog or when PDFium rejects the form-fill environment.
+    pub fn form_environment(&self) -> Option<FormEnvironment<'_, 'lib>> {
+        if self.form_type() == 0 {
+            return None;
+        }
+        let mut callbacks = Box::new(pdfium_sys::FPDF_FORMFILLINFO::default());
+        callbacks.version = 1;
+        let handle = unsafe {
+            ffi!(FPDFDOC_InitFormFillEnvironment(
+                self.handle,
+                &mut *callbacks
+            ))
+        };
+        (!handle.is_null()).then_some(FormEnvironment {
+            handle,
+            _callbacks: callbacks,
+            _doc: std::marker::PhantomData,
+        })
     }
 
     pub fn page(&self, index: i32) -> Result<Page<'_, 'lib>, PdfiumError> {
@@ -45,6 +90,132 @@ impl<'lib> Document<'lib> {
             doc_handle: self.handle,
             _doc: std::marker::PhantomData,
         })
+    }
+
+    /// Read one entry from the document's `/Info` metadata dictionary
+    /// (e.g. `"Creator"`, `"Producer"`, `"Title"`). Returns `None` when the
+    /// tag is absent or empty.
+    pub fn meta_text(&self, tag: &str) -> Option<String> {
+        let tag_c = std::ffi::CString::new(tag).ok()?;
+        let needed = unsafe {
+            ffi!(FPDF_GetMetaText(
+                self.handle,
+                tag_c.as_ptr(),
+                std::ptr::null_mut(),
+                0
+            ))
+        } as usize;
+        if needed < 2 {
+            return None;
+        }
+        // `needed` is byte length of the UTF-16 value including a trailing NUL.
+        let mut buf: Vec<u16> = vec![0; needed / 2];
+        let written = unsafe {
+            ffi!(FPDF_GetMetaText(
+                self.handle,
+                tag_c.as_ptr(),
+                buf.as_mut_ptr() as *mut std::os::raw::c_void,
+                needed as std::os::raw::c_ulong,
+            ))
+        } as usize;
+        if written < 2 {
+            return None;
+        }
+        let chars = written / 2;
+        let end = if buf.get(chars - 1) == Some(&0) {
+            chars - 1
+        } else {
+            chars
+        };
+        if end == 0 {
+            return None;
+        }
+        Some(String::from_utf16_lossy(&buf[..end]))
+    }
+
+    /// Number of packets in the document's `/XFA` array (0 for non-XFA docs).
+    pub fn xfa_packet_count(&self) -> i32 {
+        unsafe { ffi!(FPDF_GetXFAPacketCount(self.handle)) }
+    }
+
+    /// Read every packet from the document's `/XFA` array. Empty for
+    /// non-XFA documents. Individual name/content read failures surface as
+    /// `None` fields rather than dropping the packet.
+    pub fn xfa_packets(&self) -> Vec<XfaPacket> {
+        let count = self.xfa_packet_count();
+        if count <= 0 {
+            return Vec::new();
+        }
+        let mut out = Vec::with_capacity(count as usize);
+        for index in 0..count {
+            let name_len = unsafe {
+                ffi!(FPDF_GetXFAPacketName(
+                    self.handle,
+                    index,
+                    std::ptr::null_mut(),
+                    0
+                ))
+            } as usize;
+            let name = (name_len > 0)
+                .then(|| {
+                    let mut buf = vec![0u8; name_len];
+                    let written = unsafe {
+                        ffi!(FPDF_GetXFAPacketName(
+                            self.handle,
+                            index,
+                            buf.as_mut_ptr() as *mut std::os::raw::c_void,
+                            name_len as std::os::raw::c_ulong,
+                        ))
+                    } as usize;
+                    if written == 0 {
+                        return None;
+                    }
+                    buf.truncate(written.min(name_len));
+                    while buf.last() == Some(&0) {
+                        buf.pop();
+                    }
+                    Some(String::from_utf8_lossy(&buf).into_owned())
+                })
+                .flatten();
+
+            let mut content_len: std::os::raw::c_ulong = 0;
+            let sized = unsafe {
+                ffi!(FPDF_GetXFAPacketContent(
+                    self.handle,
+                    index,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut content_len,
+                ))
+            };
+            let content = (sized != 0 && content_len > 0)
+                .then(|| {
+                    let mut buf = vec![0u8; content_len as usize];
+                    let mut written: std::os::raw::c_ulong = 0;
+                    let ok = unsafe {
+                        ffi!(FPDF_GetXFAPacketContent(
+                            self.handle,
+                            index,
+                            buf.as_mut_ptr() as *mut std::os::raw::c_void,
+                            content_len,
+                            &mut written,
+                        ))
+                    };
+                    if ok == 0 {
+                        return None;
+                    }
+                    buf.truncate((written as usize).min(buf.len()));
+                    Some(buf)
+                })
+                .flatten();
+
+            out.push(XfaPacket {
+                index,
+                name,
+                content,
+            });
+        }
+        out
     }
 
     /// Walk the document outline (bookmarks). Returns entries in pre-order
@@ -88,6 +259,23 @@ impl<'lib> Document<'lib> {
 
             cur = unsafe { ffi!(FPDFBookmark_GetNextSibling(self.handle, cur)) };
         }
+    }
+}
+
+impl FormEnvironment<'_, '_> {
+    /// Execute document-level JavaScript and open actions. Some AcroForms
+    /// only compute field values/appearances in these actions, so run this
+    /// once after init when the environment is used for rendering. Mirrors
+    /// the LlamaParse extract binary's document setup.
+    pub fn run_document_actions(&self) {
+        unsafe { ffi!(FORM_DoDocumentJSAction(self.handle)) };
+        unsafe { ffi!(FORM_DoDocumentOpenAction(self.handle)) };
+    }
+}
+
+impl Drop for FormEnvironment<'_, '_> {
+    fn drop(&mut self) {
+        unsafe { ffi!(FPDFDOC_ExitFormFillEnvironment(self.handle)) };
     }
 }
 

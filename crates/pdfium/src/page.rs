@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::bitmap::Bitmap;
-use crate::document::Document;
+use crate::document::{Document, FormEnvironment};
 use crate::error::PdfiumError;
 use crate::ffi;
 use crate::text_page::TextPage;
@@ -15,6 +15,126 @@ pub struct ImageBounds {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+}
+
+fn image_object_data(obj: pdfium_sys::FPDF_PAGEOBJECT, decoded: bool) -> Option<Vec<u8>> {
+    let size = unsafe {
+        if decoded {
+            ffi!(FPDFImageObj_GetImageDataDecoded(
+                obj,
+                std::ptr::null_mut(),
+                0
+            ))
+        } else {
+            ffi!(FPDFImageObj_GetImageDataRaw(obj, std::ptr::null_mut(), 0))
+        }
+    };
+    if size == 0 || size > usize::MAX as std::os::raw::c_ulong {
+        return None;
+    }
+    let mut bytes = vec![0u8; size as usize];
+    let written = unsafe {
+        if decoded {
+            ffi!(FPDFImageObj_GetImageDataDecoded(
+                obj,
+                bytes.as_mut_ptr().cast(),
+                size
+            ))
+        } else {
+            ffi!(FPDFImageObj_GetImageDataRaw(
+                obj,
+                bytes.as_mut_ptr().cast(),
+                size
+            ))
+        }
+    };
+    if written == 0 || written > size {
+        return None;
+    }
+    bytes.truncate(written as usize);
+    Some(bytes)
+}
+
+fn image_filters(obj: pdfium_sys::FPDF_PAGEOBJECT) -> Vec<String> {
+    let count = unsafe { ffi!(FPDFImageObj_GetImageFilterCount(obj)) };
+    if count <= 0 {
+        return Vec::new();
+    }
+    (0..count)
+        .filter_map(|index| {
+            let size = unsafe {
+                ffi!(FPDFImageObj_GetImageFilter(
+                    obj,
+                    index,
+                    std::ptr::null_mut(),
+                    0
+                ))
+            };
+            if size == 0 || size > 256 {
+                return None;
+            }
+            let mut bytes = vec![0u8; size as usize];
+            let written = unsafe {
+                ffi!(FPDFImageObj_GetImageFilter(
+                    obj,
+                    index,
+                    bytes.as_mut_ptr().cast(),
+                    size
+                ))
+            };
+            if written == 0 {
+                return None;
+            }
+            let end = bytes
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(bytes.len());
+            std::str::from_utf8(&bytes[..end]).ok().map(str::to_owned)
+        })
+        .collect()
+}
+
+fn is_jpeg(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0xff, 0xd8, 0xff]) && bytes.ends_with(&[0xff, 0xd9])
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::is_jpeg;
+
+    #[test]
+    fn validates_complete_jpeg_streams() {
+        assert!(is_jpeg(&[0xff, 0xd8, 0xff, 0xe0, 1, 2, 0xff, 0xd9]));
+        assert!(!is_jpeg(&[0xff, 0xd8, 0xff, 0xe0]));
+        assert!(!is_jpeg(&[0x89, b'P', b'N', b'G', 0xff, 0xd9]));
+    }
+}
+
+/// Metadata for an embedded image page object retained by the extraction
+/// filters. `object_index` is its index among all image objects on the page.
+#[derive(Debug, Clone)]
+pub struct ImageObjectInfo {
+    pub object_index: usize,
+    pub bounds: ImageBounds,
+    pub pixel_width: u32,
+    pub pixel_height: u32,
+    /// Clockwise page-object rotation in degrees, normalized to `[0, 360)`.
+    pub rotation: f32,
+    /// Original JPEG stream bytes when PDFium reports a directly decodable
+    /// DCT stream and the decoded data has a valid JPEG signature.
+    pub jpeg_bytes: Option<Vec<u8>>,
+    /// Raw encoded stream bytes, used to identify repeated image resources.
+    pub raw_bytes: Option<Vec<u8>>,
+    #[doc(hidden)]
+    pub bits_per_pixel: u32,
+    #[doc(hidden)]
+    pub colorspace: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImageObjects {
+    pub images: Vec<ImageObjectInfo>,
+    pub error_count: u32,
 }
 
 /// One segment of a vector path. Coordinates are in viewport space
@@ -59,6 +179,44 @@ pub struct PathObject {
 pub struct PdfLink {
     pub rect: RectF,
     pub uri: String,
+}
+
+/// One PDF annotation with geometry normalized to viewport space (top-left
+/// origin, 72 DPI). String fields mirror the standard annotation dictionary.
+#[derive(Debug, Clone)]
+pub struct PdfAnnotation {
+    pub object_number: Option<i32>,
+    pub subtype: String,
+    pub contents: Option<String>,
+    pub created: Option<String>,
+    pub modified: Option<String>,
+    pub title: Option<String>,
+    pub rect: Option<RectF>,
+    pub quadpoint_rects: Vec<RectF>,
+    pub uri: Option<String>,
+}
+
+/// One AcroForm widget with its resolved field metadata. A logical radio or
+/// checkbox field may appear more than once when it owns several widgets.
+#[derive(Debug, Clone)]
+pub struct PdfFormField {
+    pub id: String,
+    pub field_type: String,
+    pub page: u32,
+    pub annotation_index: i32,
+    pub widget_index: i32,
+    pub object_number: Option<i32>,
+    pub name: Option<String>,
+    pub alternate_name: Option<String>,
+    pub value: Option<String>,
+    pub export_value: Option<String>,
+    pub field_flags: i32,
+    pub control_count: Option<i32>,
+    pub control_index: Option<i32>,
+    pub checked: Option<bool>,
+    pub rect: Option<RectF>,
+    pub options: Vec<String>,
+    pub selected_options: Vec<String>,
 }
 
 /// A loaded page within a [`Document`].
@@ -169,6 +327,49 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
 
     /// Render the page to a BGRA bitmap at the given DPI.
     pub fn render(&self, dpi: f32) -> Result<Bitmap<'lib>, PdfiumError> {
+        self.render_with_form(dpi, None)
+    }
+
+    /// Render the page to a BGRA bitmap, drawing form-field appearances
+    /// (filled values, checkbox states) on top via `FPDF_FFLDraw` when a form
+    /// environment is supplied. Without it, PDFium only paints widget
+    /// annotations' static appearance streams, so filled-in form data can be
+    /// missing from the raster. The page open/close form notifications are
+    /// wrapped around the render, mirroring the LlamaParse extract binary.
+    pub fn render_with_form(
+        &self,
+        dpi: f32,
+        form: Option<&FormEnvironment>,
+    ) -> Result<Bitmap<'lib>, PdfiumError> {
+        if let Some(form) = form {
+            unsafe {
+                ffi!(FORM_OnAfterLoadPage(self.handle, form.handle));
+                ffi!(FORM_DoPageAAction(
+                    self.handle,
+                    form.handle,
+                    pdfium_sys::FPDFPAGE_AACTION_OPEN as i32,
+                ));
+            }
+        }
+        let result = self.render_bitmap(dpi, form);
+        if let Some(form) = form {
+            unsafe {
+                ffi!(FORM_DoPageAAction(
+                    self.handle,
+                    form.handle,
+                    pdfium_sys::FPDFPAGE_AACTION_CLOSE as i32,
+                ));
+                ffi!(FORM_OnBeforeClosePage(self.handle, form.handle));
+            }
+        }
+        result
+    }
+
+    fn render_bitmap(
+        &self,
+        dpi: f32,
+        form: Option<&FormEnvironment>,
+    ) -> Result<Bitmap<'lib>, PdfiumError> {
         let scale = dpi / 72.0;
         let width = (self.width() * scale).round() as i32;
         let height = (self.height() * scale).round() as i32;
@@ -196,30 +397,38 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
             ));
         }
 
+        if let Some(form) = form {
+            // NOTE: like the LlamaParse extract binary, popup annotations are
+            // not drawn (flags 0 for the form layer draw).
+            unsafe {
+                ffi!(FPDF_FFLDraw(
+                    form.handle,
+                    bitmap.handle(),
+                    self.handle,
+                    0,
+                    0,
+                    width,
+                    height,
+                    0,
+                    0,
+                ));
+            }
+        }
+
         Ok(bitmap)
     }
 
-    /// Extract bounding boxes of embedded image objects on this page.
-    /// Returns coordinates in viewport space (Y-down, top-left origin) in PDF points.
-    /// Filters out images smaller than `min_size_pt` and images covering more than
-    /// `max_page_coverage` fraction of the page.
-    pub fn image_bounds(&self, min_size_pt: f32, max_page_coverage: f32) -> Vec<ImageBounds> {
-        let page_width = self.width();
-        let page_height = self.height();
-        let obj_count = unsafe { ffi!(FPDFPage_CountObjects(self.handle)) };
-        let mut results = Vec::new();
-
-        for i in 0..obj_count {
+    /// Union of all top-level page object bounds, in PDF page space.
+    /// `None` when the page has no content objects. Mirrors the LlamaParse
+    /// extract binary's `Parse_getContentBounds`.
+    pub fn content_bounds(&self) -> Option<RectF> {
+        let count = unsafe { ffi!(FPDFPage_CountObjects(self.handle)) };
+        let mut bounds: Option<RectF> = None;
+        for i in 0..count {
             let obj = unsafe { ffi!(FPDFPage_GetObject(self.handle, i)) };
             if obj.is_null() {
                 continue;
             }
-
-            let obj_type = unsafe { ffi!(FPDFPageObj_GetType(obj)) };
-            if obj_type != pdfium_sys::FPDF_PAGEOBJ_IMAGE as i32 {
-                continue;
-            }
-
             let mut left: f32 = 0.0;
             let mut bottom: f32 = 0.0;
             let mut right: f32 = 0.0;
@@ -236,6 +445,86 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
             if ok == 0 {
                 continue;
             }
+            bounds = Some(match bounds {
+                None => RectF {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                },
+                Some(prev) => RectF {
+                    left: prev.left.min(left),
+                    top: prev.top.max(top),
+                    right: prev.right.max(right),
+                    bottom: prev.bottom.min(bottom),
+                },
+            });
+        }
+        bounds
+    }
+
+    /// Extract bounding boxes of embedded image objects on this page.
+    /// Returns coordinates in viewport space (Y-down, top-left origin) in PDF points.
+    /// Filters out images smaller than `min_size_pt` and images covering more than
+    /// `max_page_coverage` fraction of the page.
+    pub fn image_bounds(&self, min_size_pt: f32, max_page_coverage: f32) -> Vec<ImageBounds> {
+        self.image_objects(min_size_pt, max_page_coverage, false)
+            .images
+            .into_iter()
+            .map(|image| image.bounds)
+            .collect()
+    }
+
+    /// Extract metadata for embedded image objects on this page.
+    pub fn image_objects(
+        &self,
+        min_size_pt: f32,
+        max_page_coverage: f32,
+        include_data: bool,
+    ) -> ImageObjects {
+        let page_width = self.width();
+        let page_height = self.height();
+        let view_box = self.view_box().unwrap_or(RectF {
+            left: 0.0,
+            top: page_height,
+            right: page_width,
+            bottom: 0.0,
+        });
+        let obj_count = unsafe { ffi!(FPDFPage_CountObjects(self.handle)) };
+        let mut results = Vec::new();
+        let mut error_count = 0;
+        let mut image_index = 0usize;
+
+        for i in 0..obj_count {
+            let obj = unsafe { ffi!(FPDFPage_GetObject(self.handle, i)) };
+            if obj.is_null() {
+                continue;
+            }
+
+            let obj_type = unsafe { ffi!(FPDFPageObj_GetType(obj)) };
+            if obj_type != pdfium_sys::FPDF_PAGEOBJ_IMAGE as i32 {
+                continue;
+            }
+            let object_index = image_index;
+            image_index += 1;
+
+            let mut left: f32 = 0.0;
+            let mut bottom: f32 = 0.0;
+            let mut right: f32 = 0.0;
+            let mut top: f32 = 0.0;
+            let ok = unsafe {
+                ffi!(FPDFPageObj_GetBounds(
+                    obj,
+                    &mut left,
+                    &mut bottom,
+                    &mut right,
+                    &mut top
+                ))
+            };
+            if ok == 0 {
+                error_count += 1;
+                continue;
+            }
 
             let w = right - left;
             let h = top - bottom;
@@ -247,16 +536,94 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
                 continue;
             }
 
-            // Convert from PDF coords (bottom-left origin) to viewport (top-left origin)
-            results.push(ImageBounds {
-                x: left,
-                y: page_height - top,
-                width: w,
-                height: h,
+            let viewport = self.bounds_to_viewport(
+                &view_box,
+                &RectF {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                },
+            );
+
+            let mut metadata = pdfium_sys::FPDF_IMAGEOBJ_METADATA::default();
+            let (pixel_width, pixel_height, rotation) = if include_data {
+                let metadata_ok = unsafe {
+                    ffi!(FPDFImageObj_GetImageMetadata(
+                        obj,
+                        self.handle,
+                        &mut metadata
+                    ))
+                };
+                let mut pixel_width = metadata.width;
+                let mut pixel_height = metadata.height;
+                let pixel_size_ok = unsafe {
+                    ffi!(FPDFImageObj_GetImagePixelSize(
+                        obj,
+                        &mut pixel_width,
+                        &mut pixel_height
+                    ))
+                };
+                if pixel_size_ok == 0 && metadata_ok == 0 {
+                    pixel_width = 0;
+                    pixel_height = 0;
+                    error_count += 1;
+                }
+
+                let mut matrix = pdfium_sys::FS_MATRIX {
+                    a: 1.0,
+                    b: 0.0,
+                    c: 0.0,
+                    d: 1.0,
+                    e: 0.0,
+                    f: 0.0,
+                };
+                let matrix_ok = unsafe { ffi!(FPDFPageObj_GetMatrix(obj, &mut matrix)) };
+                let rotation = if matrix_ok != 0 {
+                    matrix.b.atan2(matrix.a).to_degrees().rem_euclid(360.0)
+                } else {
+                    0.0
+                };
+                (pixel_width, pixel_height, rotation)
+            } else {
+                (0, 0, 0.0)
+            };
+
+            let raw_bytes = include_data
+                .then(|| image_object_data(obj, false))
+                .flatten();
+            let jpeg_bytes = if include_data
+                && image_filters(obj)
+                    .iter()
+                    .any(|filter| filter == "DCTDecode")
+            {
+                image_object_data(obj, true).filter(|bytes| is_jpeg(bytes))
+            } else {
+                None
+            };
+
+            results.push(ImageObjectInfo {
+                object_index,
+                bounds: ImageBounds {
+                    x: viewport.left,
+                    y: viewport.top,
+                    width: viewport.right - viewport.left,
+                    height: viewport.bottom - viewport.top,
+                },
+                pixel_width,
+                pixel_height,
+                rotation,
+                jpeg_bytes,
+                raw_bytes,
+                bits_per_pixel: metadata.bits_per_pixel,
+                colorspace: metadata.colorspace,
             });
         }
 
-        results
+        ImageObjects {
+            images: results,
+            error_count,
+        }
     }
 
     /// Extract bounding boxes of filled vector path objects on this page,
@@ -439,6 +806,395 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
         }
         out
     }
+
+    /// Enumerate all page annotations. Unlike [`Page::links`], this preserves
+    /// non-link subtypes and annotation dictionary metadata for public output.
+    pub fn annotations(&self, view_box: &RectF) -> Vec<PdfAnnotation> {
+        let count = unsafe { ffi!(FPDFPage_GetAnnotCount(self.handle)) };
+        let mut out = Vec::with_capacity(count.max(0) as usize);
+        for index in 0..count {
+            let annot = unsafe { ffi!(FPDFPage_GetAnnot(self.handle, index)) };
+            if annot.is_null() {
+                continue;
+            }
+
+            let subtype = unsafe { ffi!(FPDFAnnot_GetSubtype(annot)) };
+            let mut rect = pdfium_sys::FS_RECTF::default();
+            let rect = if unsafe { ffi!(FPDFAnnot_GetRect(annot, &mut rect)) } != 0 {
+                Some(self.bounds_to_viewport(
+                    view_box,
+                    &RectF {
+                        left: rect.left,
+                        top: rect.top,
+                        right: rect.right,
+                        bottom: rect.bottom,
+                    },
+                ))
+            } else {
+                None
+            };
+
+            let mut quadpoint_rects = Vec::new();
+            if unsafe { ffi!(FPDFAnnot_HasAttachmentPoints(annot)) } != 0 {
+                let quad_count = unsafe { ffi!(FPDFAnnot_CountAttachmentPoints(annot)) };
+                quadpoint_rects.reserve(quad_count);
+                for quad_index in 0..quad_count {
+                    let mut quad = pdfium_sys::FS_QUADPOINTSF::default();
+                    if unsafe { ffi!(FPDFAnnot_GetAttachmentPoints(annot, quad_index, &mut quad)) }
+                        == 0
+                    {
+                        continue;
+                    }
+                    let bounds = RectF {
+                        left: quad.x1.min(quad.x2).min(quad.x3).min(quad.x4),
+                        bottom: quad.y1.min(quad.y2).min(quad.y3).min(quad.y4),
+                        right: quad.x1.max(quad.x2).max(quad.x3).max(quad.x4),
+                        top: quad.y1.max(quad.y2).max(quad.y3).max(quad.y4),
+                    };
+                    quadpoint_rects.push(self.bounds_to_viewport(view_box, &bounds));
+                }
+            }
+
+            let uri = if subtype == pdfium_sys::FPDF_ANNOT_LINK as i32 {
+                let link = unsafe { ffi!(FPDFAnnot_GetLink(annot)) };
+                if link.is_null() {
+                    None
+                } else {
+                    let action = unsafe { ffi!(FPDFLink_GetAction(link)) };
+                    if action.is_null() {
+                        None
+                    } else {
+                        read_uri_path(self.doc_handle, action)
+                    }
+                }
+            } else {
+                None
+            };
+
+            out.push(PdfAnnotation {
+                object_number: match unsafe { ffi!(FPDFAnnot_GetObjNum(annot)) } {
+                    number if number > 0 => Some(number),
+                    _ => None,
+                },
+                subtype: annotation_subtype_name(subtype).to_string(),
+                contents: read_annotation_string(annot, b"Contents\0"),
+                created: read_annotation_string(annot, b"CreationDate\0"),
+                modified: read_annotation_string(annot, b"M\0"),
+                title: read_annotation_string(annot, b"T\0"),
+                rect,
+                quadpoint_rects,
+                uri,
+            });
+            unsafe { ffi!(FPDFPage_CloseAnnot(annot)) };
+        }
+        out
+    }
+
+    /// Enumerate AcroForm widget annotations and resolve their field values
+    /// through PDFium's form-fill environment.
+    pub fn form_fields(
+        &self,
+        form: &FormEnvironment<'_, '_>,
+        view_box: &RectF,
+        page_number: u32,
+    ) -> Vec<PdfFormField> {
+        let count = unsafe { ffi!(FPDFPage_GetAnnotCount(self.handle)) };
+        let mut out = Vec::new();
+        let mut widget_index = 0;
+        for annotation_index in 0..count {
+            let annot = unsafe { ffi!(FPDFPage_GetAnnot(self.handle, annotation_index)) };
+            if annot.is_null() {
+                continue;
+            }
+            if unsafe { ffi!(FPDFAnnot_GetSubtype(annot)) } != pdfium_sys::FPDF_ANNOT_WIDGET as i32
+            {
+                unsafe { ffi!(FPDFPage_CloseAnnot(annot)) };
+                continue;
+            }
+
+            let parent =
+                unsafe { ffi!(FPDFAnnot_GetLinkedAnnot(annot, b"Parent\0".as_ptr().cast())) };
+            let name = first_present([
+                read_form_string(
+                    form.handle,
+                    annot,
+                    |handle, annotation, buffer, len| unsafe {
+                        ffi!(FPDFAnnot_GetFormFieldName(handle, annotation, buffer, len))
+                    },
+                ),
+                read_annotation_string(annot, b"T\0"),
+                (!parent.is_null())
+                    .then(|| read_annotation_string(parent, b"T\0"))
+                    .flatten(),
+            ]);
+            let alternate_name = first_present([
+                read_form_string(
+                    form.handle,
+                    annot,
+                    |handle, annotation, buffer, len| unsafe {
+                        ffi!(FPDFAnnot_GetFormFieldAlternateName(
+                            handle, annotation, buffer, len
+                        ))
+                    },
+                ),
+                read_annotation_string(annot, b"TU\0"),
+                (!parent.is_null())
+                    .then(|| read_annotation_string(parent, b"TU\0"))
+                    .flatten(),
+            ]);
+            let value = first_present([
+                read_form_string(
+                    form.handle,
+                    annot,
+                    |handle, annotation, buffer, len| unsafe {
+                        ffi!(FPDFAnnot_GetFormFieldValue(handle, annotation, buffer, len))
+                    },
+                ),
+                read_annotation_string(annot, b"V\0"),
+                (!parent.is_null())
+                    .then(|| read_annotation_string(parent, b"V\0"))
+                    .flatten(),
+            ]);
+            let appearance_state = read_annotation_string(annot, b"AS\0");
+            let mut export_value = first_present([
+                read_form_string(
+                    form.handle,
+                    annot,
+                    |handle, annotation, buffer, len| unsafe {
+                        ffi!(FPDFAnnot_GetFormFieldExportValue(
+                            handle, annotation, buffer, len
+                        ))
+                    },
+                ),
+                read_annotation_string(annot, b"V\0"),
+            ]);
+            if export_value.is_none() {
+                export_value = appearance_state
+                    .as_ref()
+                    .filter(|state| state.as_str() != "Off")
+                    .cloned();
+            }
+
+            let raw_type = unsafe { ffi!(FPDFAnnot_GetFormFieldType(form.handle, annot)) };
+            let object_number = match unsafe { ffi!(FPDFAnnot_GetObjNum(annot)) } {
+                number if number > 0 => Some(number),
+                _ => None,
+            };
+            let id = name
+                .clone()
+                .or_else(|| object_number.map(|n| format!("pdf-object-{n}")))
+                .unwrap_or_else(|| format!("page-{page_number}-widget-{widget_index}"));
+            let rect = annotation_rect(self, annot, view_box);
+            let option_count = unsafe { ffi!(FPDFAnnot_GetOptionCount(form.handle, annot)) };
+            let mut options = Vec::new();
+            let mut selected_options = Vec::new();
+            for option_index in 0..option_count.max(0) {
+                if let Some(label) = read_form_option_label(form.handle, annot, option_index) {
+                    if unsafe { ffi!(FPDFAnnot_IsOptionSelected(form.handle, annot, option_index)) }
+                        != 0
+                    {
+                        selected_options.push(label.clone());
+                    }
+                    options.push(label);
+                }
+            }
+            let is_checkable = raw_type == pdfium_sys::FPDF_FORMFIELD_CHECKBOX as i32
+                || raw_type == pdfium_sys::FPDF_FORMFIELD_RADIOBUTTON as i32;
+            let checked = is_checkable.then(|| {
+                (unsafe { ffi!(FPDFAnnot_IsChecked(form.handle, annot)) }) != 0
+                    || appearance_state
+                        .as_ref()
+                        .is_some_and(|state| state != "Off")
+            });
+            let control_count = is_checkable
+                .then(|| unsafe { ffi!(FPDFAnnot_GetFormControlCount(form.handle, annot)) })
+                .filter(|value| *value >= 0);
+            let control_index = is_checkable
+                .then(|| unsafe { ffi!(FPDFAnnot_GetFormControlIndex(form.handle, annot)) })
+                .filter(|value| *value >= 0);
+
+            out.push(PdfFormField {
+                id,
+                field_type: form_field_type_name(raw_type).to_owned(),
+                page: page_number,
+                annotation_index,
+                widget_index,
+                object_number,
+                name,
+                alternate_name,
+                value,
+                export_value,
+                field_flags: unsafe { ffi!(FPDFAnnot_GetFormFieldFlags(form.handle, annot)) },
+                control_count,
+                control_index,
+                checked,
+                rect,
+                options,
+                selected_options,
+            });
+            if !parent.is_null() {
+                unsafe { ffi!(FPDFPage_CloseAnnot(parent)) };
+            }
+            unsafe { ffi!(FPDFPage_CloseAnnot(annot)) };
+            widget_index += 1;
+        }
+        out
+    }
+}
+
+fn form_field_type_name(field_type: i32) -> &'static str {
+    match field_type as u32 {
+        pdfium_sys::FPDF_FORMFIELD_PUSHBUTTON => "pushbutton",
+        pdfium_sys::FPDF_FORMFIELD_CHECKBOX => "checkbox",
+        pdfium_sys::FPDF_FORMFIELD_RADIOBUTTON => "radio",
+        pdfium_sys::FPDF_FORMFIELD_COMBOBOX => "combobox",
+        pdfium_sys::FPDF_FORMFIELD_LISTBOX => "listbox",
+        pdfium_sys::FPDF_FORMFIELD_TEXTFIELD => "text",
+        pdfium_sys::FPDF_FORMFIELD_SIGNATURE => "signature",
+        _ => "unknown",
+    }
+}
+
+fn first_present<const N: usize>(values: [Option<String>; N]) -> Option<String> {
+    values.into_iter().flatten().find(|value| !value.is_empty())
+}
+
+fn read_form_string(
+    form: pdfium_sys::FPDF_FORMHANDLE,
+    annot: pdfium_sys::FPDF_ANNOTATION,
+    mut getter: impl FnMut(
+        pdfium_sys::FPDF_FORMHANDLE,
+        pdfium_sys::FPDF_ANNOTATION,
+        *mut u16,
+        std::os::raw::c_ulong,
+    ) -> std::os::raw::c_ulong,
+) -> Option<String> {
+    let needed = getter(form, annot, std::ptr::null_mut(), 0) as usize;
+    if needed < 2 {
+        return None;
+    }
+    let mut buffer = vec![0u16; needed.div_ceil(2)];
+    let written = getter(
+        form,
+        annot,
+        buffer.as_mut_ptr(),
+        needed as std::os::raw::c_ulong,
+    ) as usize;
+    if written < 2 {
+        return None;
+    }
+    let units = (written / 2).min(buffer.len());
+    let end = units.saturating_sub(usize::from(buffer.get(units.saturating_sub(1)) == Some(&0)));
+    let value = String::from_utf16_lossy(&buffer[..end]);
+    (!value.is_empty()).then_some(value)
+}
+
+fn read_form_option_label(
+    form: pdfium_sys::FPDF_FORMHANDLE,
+    annot: pdfium_sys::FPDF_ANNOTATION,
+    index: i32,
+) -> Option<String> {
+    read_form_string(form, annot, |handle, annotation, buffer, len| unsafe {
+        ffi!(FPDFAnnot_GetOptionLabel(
+            handle, annotation, index, buffer, len
+        ))
+    })
+}
+
+fn annotation_rect(
+    page: &Page<'_, '_>,
+    annot: pdfium_sys::FPDF_ANNOTATION,
+    view_box: &RectF,
+) -> Option<RectF> {
+    let mut rect = pdfium_sys::FS_RECTF::default();
+    (unsafe { ffi!(FPDFAnnot_GetRect(annot, &mut rect)) } != 0).then(|| {
+        page.bounds_to_viewport(
+            view_box,
+            &RectF {
+                left: rect.left,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+            },
+        )
+    })
+}
+
+fn annotation_subtype_name(subtype: pdfium_sys::FPDF_ANNOTATION_SUBTYPE) -> &'static str {
+    const NAMES: [&str; 29] = [
+        "unknown",
+        "text",
+        "link",
+        "freetext",
+        "line",
+        "square",
+        "circle",
+        "polygon",
+        "polyline",
+        "highlight",
+        "underline",
+        "squiggly",
+        "strikeout",
+        "stamp",
+        "caret",
+        "ink",
+        "popup",
+        "fileattachment",
+        "sound",
+        "movie",
+        "widget",
+        "screen",
+        "printermark",
+        "trapnet",
+        "watermark",
+        "threed",
+        "richmedia",
+        "xfawidget",
+        "redact",
+    ];
+    usize::try_from(subtype)
+        .ok()
+        .and_then(|index| NAMES.get(index))
+        .copied()
+        .unwrap_or("unknown")
+}
+
+fn read_annotation_string(
+    annot: pdfium_sys::FPDF_ANNOTATION,
+    key: &'static [u8],
+) -> Option<String> {
+    let key = key.as_ptr().cast();
+    let needed = unsafe {
+        ffi!(FPDFAnnot_GetStringValue(
+            annot,
+            key,
+            std::ptr::null_mut(),
+            0
+        ))
+    } as usize;
+    if needed < 2 {
+        return None;
+    }
+    let mut buf = vec![0u16; needed.div_ceil(2)];
+    let written = unsafe {
+        ffi!(FPDFAnnot_GetStringValue(
+            annot,
+            key,
+            buf.as_mut_ptr(),
+            needed as std::os::raw::c_ulong
+        ))
+    } as usize;
+    if written < 2 {
+        return None;
+    }
+    let units = (written / 2).min(buf.len());
+    let end = if buf.get(units.saturating_sub(1)) == Some(&0) {
+        units.saturating_sub(1)
+    } else {
+        units
+    };
+    let value = String::from_utf16_lossy(&buf[..end]);
+    if value.is_empty() { None } else { Some(value) }
 }
 
 /// Read a link action's URI path. PDFium returns the URI as a NUL-terminated
@@ -890,5 +1646,115 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
 impl Drop for Page<'_, '_> {
     fn drop(&mut self) {
         unsafe { ffi!(FPDF_ClosePage(self.handle)) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Library;
+
+    #[test]
+    fn nested_form_matrix_composition_transforms_path_points_in_order() {
+        // Outer form translates by (100, 20), inner form scales by (2, 3),
+        // and the path object translates by (4, 5). The collector composes
+        // these in outer(inner(path(point))) order.
+        let outer = pdfium_sys::FS_MATRIX {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            e: 100.0,
+            f: 20.0,
+        };
+        let inner = pdfium_sys::FS_MATRIX {
+            a: 2.0,
+            b: 0.0,
+            c: 0.0,
+            d: 3.0,
+            e: 0.0,
+            f: 0.0,
+        };
+        let object = pdfium_sys::FS_MATRIX {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            e: 4.0,
+            f: 5.0,
+        };
+        let nested = compose_matrix(&compose_matrix(&outer, &inner), &object);
+        let x = nested.a * 1.0 + nested.c * 2.0 + nested.e;
+        let y = nested.b * 1.0 + nested.d * 2.0 + nested.f;
+        assert_eq!((x, y), (110.0, 41.0));
+
+        let viewport = ViewportTransform {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: -1.0,
+            e: 0.0,
+            f: 200.0,
+        };
+        assert_eq!(viewport.transform_point(x, y), (110.0, 159.0));
+    }
+
+    fn annotation_pdf() -> Vec<u8> {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [4 0 R 5 0 R] >>",
+            "<< /Type /Annot /Subtype /Highlight /Rect [10 20 100 40] /QuadPoints [10 40 100 40 10 20 100 20] /Contents (review this) /T (Reviewer) /CreationDate (D:20260102030405Z) /M (D:20260103040506Z) >>",
+            "<< /Type /Annot /Subtype /Link /Rect [10 50 100 70] /Border [0 0 0] /A << /S /URI /URI (https://example.com) >> >>",
+        ];
+        let mut pdf = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::with_capacity(objects.len());
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(format!("{} 0 obj\n{}\nendobj\n", index + 1, object).as_bytes());
+        }
+        let xref = pdf.len();
+        pdf.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
+        pdf.extend_from_slice(b"0000000000 65535 f \n");
+        for offset in offsets {
+            pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        pdf
+    }
+
+    #[test]
+    fn extracts_annotation_metadata_geometry_and_link_uri() {
+        let bytes = annotation_pdf();
+        let library = Library::init();
+        let document = library.load_document_from_bytes(&bytes, None).unwrap();
+        let page = document.page(0).unwrap();
+        let view_box = page.view_box().unwrap();
+        let annotations = page.annotations(&view_box);
+
+        assert_eq!(annotations.len(), 2);
+        let highlight = &annotations[0];
+        assert_eq!(highlight.subtype, "highlight");
+        assert_eq!(highlight.contents.as_deref(), Some("review this"));
+        assert_eq!(highlight.title.as_deref(), Some("Reviewer"));
+        assert_eq!(highlight.created.as_deref(), Some("D:20260102030405Z"));
+        assert_eq!(highlight.modified.as_deref(), Some("D:20260103040506Z"));
+        let rect = highlight.rect.as_ref().unwrap();
+        assert_eq!(
+            (rect.left, rect.top, rect.right, rect.bottom),
+            (10.0, 160.0, 100.0, 180.0)
+        );
+        assert_eq!(highlight.quadpoint_rects.len(), 1);
+
+        let link = &annotations[1];
+        assert_eq!(link.subtype, "link");
+        assert_eq!(link.uri.as_deref(), Some("https://example.com"));
+        assert_eq!(link.rect.as_ref().unwrap().top, 130.0);
     }
 }

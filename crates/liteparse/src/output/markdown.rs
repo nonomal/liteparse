@@ -149,15 +149,21 @@ mod tests {
             page_number: n,
             page_width: 612.0,
             page_height: 792.0,
+            content_bounds: None,
             text: "fallback".into(),
             markdown: String::new(),
             text_items: vec![],
             projected_lines: lines,
             regions: crate::types::Region::default(),
             graphics: vec![],
+            vector_graphics: None,
             figures: vec![],
             struct_nodes: vec![],
             image_refs: vec![],
+            complexity: None,
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
         }
     }
 
@@ -197,15 +203,21 @@ mod tests {
             page_number: 1,
             page_width: 0.0,
             page_height: 0.0,
+            content_bounds: None,
             text: "hello".into(),
             markdown: String::new(),
             text_items: vec![],
             projected_lines: vec![],
             regions: crate::types::Region::default(),
             graphics: vec![],
+            vector_graphics: None,
             figures: vec![],
             struct_nodes: vec![],
             image_refs: vec![],
+            complexity: None,
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
         };
         let out = format_markdown(&[p], &[], ImageMode::Placeholder);
         assert!(out.contains("```text"));
